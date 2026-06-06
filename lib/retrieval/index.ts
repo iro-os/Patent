@@ -12,31 +12,47 @@ export interface RetrievalResult {
   }
 }
 
-// Fast pass (R6): one multi-source query across the free DBs, dedupe, rank.
-// Deep agentic loop (SerpApi patents + Opus) is deferred until the budget is set.
+const MAX_REFS = 25 // cap the fast-pass report size
+
+// Fast pass (R6): facet search across the free DBs, dedupe, rank.
+// IMPORTANT: one giant query ANDs every term and returns 0 (PubMed auto-ANDs;
+// OpenAlex chokes on very long strings). So we split the debrief's concept
+// phrases into facets — PubMed gets an OR of quoted phrases (one call), OpenAlex
+// runs the top concepts as separate relevance searches — then merge.
 export async function searchPriorArt(opts: {
   query: string
   concepts: SearchConcepts
 }): Promise<RetrievalResult> {
-  const [pubmed, openalex] = await Promise.all([
-    searchPubmed(opts.query).catch(() => [] as RetrievedRef[]),
-    searchOpenAlex(opts.query).catch(() => [] as RetrievedRef[]),
+  const en = (opts.concepts?.en ?? []).map((c) => c.trim()).filter(Boolean)
+  const top = en.slice(0, 5)
+
+  // PubMed: OR of quoted concept phrases (broad recall in a single call).
+  const pubmedTerm = top.length
+    ? top.map((c) => `("${c.replace(/"/g, '')}")`).join(' OR ')
+    : opts.query
+  // OpenAlex: top concepts as separate relevance searches (no good boolean OR in `search`).
+  const oaConcepts = (top.length ? top : [opts.query]).slice(0, 3).filter(Boolean)
+
+  const [pubmed, ...oaResults] = await Promise.all([
+    searchPubmed(pubmedTerm, 20).catch(() => [] as RetrievedRef[]),
+    ...oaConcepts.map((c) => searchOpenAlex(c, 8).catch(() => [] as RetrievedRef[])),
   ])
+  const openalex = dedupe(oaResults.flat())
 
   const merged = dedupe([...pubmed, ...openalex])
-  const ranked = rank(merged, opts.concepts?.en ?? [])
+  const rankTerms = en.length ? tokenize(en.join(' ')) : tokenize(opts.query)
+  const ranked = rank(merged, rankTerms).slice(0, MAX_REFS)
 
   return {
     refs: ranked,
     coverage: {
       sources_searched: [
         { source: 'pubmed', queries: 1 },
-        { source: 'openalex', queries: 1 },
+        { source: 'openalex', queries: oaConcepts.length },
       ],
       date_ranges: { pubmed: dateRange(pubmed), openalex: dateRange(openalex) },
       screened_count: merged.length,
-      // Coverage honesty (invariant #4): never claim 100%. These are the real,
-      // current gaps of the free-tier fast pass.
+      // Coverage honesty (invariant #4): never claim 100%. Real current gaps.
       blind_spots: [
         '특허 문헌(Google Patents·KIPRIS·EPO) 미포함 — 현재 무료 학술 DB(PubMed·OpenAlex)만 검색합니다. 특허 검색은 예산 확정 후 추가됩니다.',
         '비영어·비색인 문헌은 누락될 수 있습니다.',
@@ -44,6 +60,20 @@ export async function searchPriorArt(opts: {
       ],
     },
   }
+}
+
+// Ranking terms = individual significant words from the concept phrases.
+// (Multi-word phrases rarely appear verbatim in a title, so we score on words.)
+function tokenize(s: string): string[] {
+  const stop = new Set(['the', 'and', 'for', 'with', 'device', 'system', 'method', 'using'])
+  return Array.from(
+    new Set(
+      s
+        .toLowerCase()
+        .split(/[^a-z0-9가-힣]+/)
+        .filter((w) => w.length >= 4 && !stop.has(w)),
+    ),
+  )
 }
 
 function normTitle(t?: string): string {
@@ -68,7 +98,7 @@ function dedupe(refs: RetrievedRef[]): RetrievedRef[] {
 // Baseline relevance: keyword overlap (title weighted 2×) + a mild recency bonus.
 // Deterministic and key-free; multilingual embedding similarity replaces this later.
 function rank(refs: RetrievedRef[], terms: string[]): RetrievedRef[] {
-  const low = terms.map((t) => t.toLowerCase()).filter(Boolean)
+  const low = terms.filter(Boolean)
   const thisYear = new Date().getFullYear()
   for (const r of refs) {
     const title = (r.title ?? '').toLowerCase()
