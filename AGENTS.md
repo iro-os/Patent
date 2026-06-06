@@ -26,4 +26,4 @@ This version has breaking changes — APIs, conventions, and file structure may 
 
 **Cost controls:** Sonnet for dev/testing, Opus only for production drafting (`PATENT_AI_MODEL`). Fast-pass search by default; the deep agentic loop is opt-in, capped, and runs in `worker/` against `research_jobs` (one active job per project). Free patent-search tiers first.
 
-**Phase:** Phase 0 (foundation) in progress. Don't build Phase 1 intelligence until the foundation is committed and reviewed.
+**Phase:** Phase 0 (foundation) DONE — scaffold + schema + RLS + Google OAuth (login verified end-to-end). Phase 1 **free/safe slice** in progress: Input mode (debrief via Sonnet + clarifying pop-ups + disclosure/§30 clock) + fast-pass worldwide prior-art over **free** DBs (PubMed + OpenAlex) + research report with honest coverage panel. Deferred until the Monday budget call: SerpApi Google Patents, multilingual embeddings (ranking is keyword+recency for now), the durable deep-research worker loop, and Opus. Document surface (3-way merge, claims, export) is Phase 2.
