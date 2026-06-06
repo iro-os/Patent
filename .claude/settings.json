@@ -29,9 +29,9 @@
     "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
   },
   "permissions": {
-    "defaultMode": "auto",
     "allow": [
-      "Bash(claude mcp *)",
+      "Bash(claude mcp list)",
+      "Bash(claude mcp get *)",
       "Bash(python3 -m json.tool)"
     ]
   }
