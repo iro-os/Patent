@@ -1,5 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { runTool, MissingKeyError } from './client'
+import type { UsageRecord } from './pricing'
 
 export interface KoSummary {
   title_ko: string
@@ -20,11 +21,14 @@ const INPUT_SCHEMA: Anthropic.Tool['input_schema'] = {
 // Korean summary for a foreign-language prior-art ref (§14.3). Returns null when the
 // Anthropic key is absent so the free retrieval path still completes (refs just lack
 // a Korean summary). Grounded: summarizes only the supplied original text.
-export async function summarizeForeignRef(opts: {
-  inventionSummary: string
-  refTitle: string
-  refAbstract: string
-}): Promise<KoSummary | null> {
+export async function summarizeForeignRef(
+  opts: {
+    inventionSummary: string
+    refTitle: string
+    refAbstract: string
+  },
+  onUsage?: (u: UsageRecord) => void | Promise<void>,
+): Promise<KoSummary | null> {
   if (!opts.refTitle && !opts.refAbstract) return null
   try {
     return await runTool<KoSummary>({
@@ -35,6 +39,7 @@ export async function summarizeForeignRef(opts: {
       toolDescription: '선행기술의 한국어 제목·요약·관련성을 제출합니다.',
       inputSchema: INPUT_SCHEMA,
       maxTokens: 700,
+      onUsage,
     })
   } catch (e) {
     if (e instanceof MissingKeyError) return null

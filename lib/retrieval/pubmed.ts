@@ -1,4 +1,5 @@
 import type { RetrievedRef } from '@/lib/types'
+import { fetchWithRetry } from './http'
 
 // PubMed E-utilities (free; biomedical — critical for the serum/안약 device).
 // No key required; PUBMED_API_KEY raises the rate limit if set.
@@ -25,7 +26,7 @@ export async function searchPubmed(query: string, retmax = 15): Promise<Retrieve
   esearch.searchParams.set('sort', 'relevance')
   politeParams(esearch)
 
-  const sRes = await fetch(esearch, { headers: { 'User-Agent': TOOL } })
+  const sRes = await fetchWithRetry(esearch, { headers: { 'User-Agent': TOOL } })
   if (!sRes.ok) return []
   const sJson = await sRes.json()
   const ids: string[] = sJson?.esearchresult?.idlist ?? []
@@ -38,7 +39,7 @@ export async function searchPubmed(query: string, retmax = 15): Promise<Retrieve
   efetch.searchParams.set('retmode', 'xml')
   politeParams(efetch)
 
-  const fRes = await fetch(efetch, { headers: { 'User-Agent': TOOL } })
+  const fRes = await fetchWithRetry(efetch, { headers: { 'User-Agent': TOOL } })
   if (!fRes.ok) return []
   return parsePubmedXml(await fRes.text())
 }
@@ -51,7 +52,12 @@ function parsePubmedXml(xml: string): RetrievedRef[] {
   for (const block of articles) {
     const pmid = first(block, /<PMID[^>]*>(\d+)<\/PMID>/)
     if (!pmid) continue
-    const title = clean(first(block, /<ArticleTitle>([\s\S]*?)<\/ArticleTitle>/))
+    // Tolerate attributes (book/part records) and fall back to a vernacular (non-English)
+    // title so those refs keep their title (and its 2× ranking weight) instead of dropping it.
+    const title = clean(
+      first(block, /<ArticleTitle[^>]*>([\s\S]*?)<\/ArticleTitle>/) ||
+        first(block, /<VernacularTitle[^>]*>([\s\S]*?)<\/VernacularTitle>/),
+    )
     const abstract = clean(
       [...block.matchAll(/<AbstractText[^>]*>([\s\S]*?)<\/AbstractText>/g)]
         .map((m) => m[1])

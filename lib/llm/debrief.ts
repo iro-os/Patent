@@ -1,5 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { runTool } from './client'
+import type { UsageRecord } from './pricing'
 import type { DebriefResult } from '@/lib/types'
 
 const SYSTEM = `당신은 대한민국 특허 실무(KIPO)에 정통한 변리사 보조 AI입니다.
@@ -86,7 +87,10 @@ const INPUT_SCHEMA: Anthropic.Tool['input_schema'] = {
   ],
 }
 
-export async function generateDebrief(ideaText: string): Promise<DebriefResult> {
+export async function generateDebrief(
+  ideaText: string,
+  onUsage?: (u: UsageRecord) => void | Promise<void>,
+): Promise<DebriefResult> {
   return runTool<DebriefResult>({
     system: SYSTEM,
     user: `다음 발명 설명을 디브리프하세요:\n\n"""\n${ideaText}\n"""`,
@@ -94,5 +98,6 @@ export async function generateDebrief(ideaText: string): Promise<DebriefResult> 
     toolDescription: '구조화된 발명 디브리프와 전 세계 선행기술 검색어를 제출합니다.',
     inputSchema: INPUT_SCHEMA,
     maxTokens: 2048,
+    onUsage,
   })
 }

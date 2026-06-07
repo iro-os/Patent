@@ -18,6 +18,9 @@ export async function POST() {
     .select('id')
     .single()
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) {
+    console.error('project create failed:', error.message)
+    return NextResponse.json({ error: 'create_failed' }, { status: 500 })
+  }
   return NextResponse.json({ id: data.id })
 }

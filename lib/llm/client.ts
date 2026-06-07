@@ -1,4 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk'
+import type { UsageRecord } from './pricing'
 
 // Default model is Sonnet for dev/testing (cost control). Opus is reserved for
 // production-quality drafting. Configured via PATENT_AI_MODEL so the model stays
@@ -35,18 +36,48 @@ export async function runTool<T>(opts: {
   toolDescription: string
   inputSchema: Anthropic.Tool['input_schema']
   maxTokens?: number
+  // Telemetry: invoked with the call's measured token usage (auto cost logging).
+  onUsage?: (usage: UsageRecord) => void | Promise<void>
+  // Cache the tools+system prefix (default true). Prefix-match caching only fires
+  // once that prefix exceeds the model's minimum (~2048 Sonnet / ~4096 Opus), so
+  // it's a no-op on today's small prompts and pays off as prompts grow (Phase 2).
+  cachePrompt?: boolean
 }): Promise<T> {
   const anthropic = getAnthropic()
+  const system: Anthropic.TextBlockParam[] | string =
+    opts.cachePrompt === false
+      ? opts.system
+      : [{ type: 'text', text: opts.system, cache_control: { type: 'ephemeral' } }]
+
   const res = await anthropic.messages.create({
     model: MODEL,
     max_tokens: opts.maxTokens ?? 2048,
-    system: opts.system,
+    system,
     messages: [{ role: 'user', content: opts.user }],
     tools: [
       { name: opts.toolName, description: opts.toolDescription, input_schema: opts.inputSchema },
     ],
     tool_choice: { type: 'tool', name: opts.toolName },
   })
+
+  if (opts.onUsage) {
+    const u = res.usage
+    await opts.onUsage({
+      model: res.model,
+      input_tokens: u.input_tokens ?? 0,
+      output_tokens: u.output_tokens ?? 0,
+      cache_creation_input_tokens: u.cache_creation_input_tokens ?? 0,
+      cache_read_input_tokens: u.cache_read_input_tokens ?? 0,
+    })
+  }
+
+  // If generation hit the token ceiling mid-tool_use, the SDK still returns a
+  // tool_use block but its `input` is truncated (missing/half-written fields).
+  // Fail loudly instead of silently persisting a corrupt structured result.
+  if (res.stop_reason === 'max_tokens') {
+    throw new Error(`LLM output truncated at max_tokens (${opts.toolName}); raise maxTokens`)
+  }
+
   const block = res.content.find((b) => b.type === 'tool_use')
   if (!block || block.type !== 'tool_use') {
     throw new Error('Model did not return a tool_use block')

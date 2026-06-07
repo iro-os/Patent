@@ -72,6 +72,19 @@ export const KIPO_SECTIONS: KipoSection[] = [
     optional: true,
     guidance: '도면 주요 부호 설명 (예: 1: 금속판, 3: 에칭부).',
   },
+  // 별지 제15호의 조건부 항목 — 의료기기엔 보통 비해당이지만 공식 구조 완전성을 위해 포함.
+  {
+    key: '수탁번호',
+    en: 'Accession number',
+    optional: true,
+    guidance: '미생물 기탁이 있는 경우 기탁기관·수탁번호·기탁일.',
+  },
+  {
+    key: '서열목록 자유텍스트',
+    en: 'Sequence listing free text',
+    optional: true,
+    guidance: '뉴클레오타이드/아미노산 서열목록이 있는 경우.',
+  },
   {
     key: '특허청구범위',
     en: 'Claims',
@@ -116,18 +129,20 @@ export function formatKipoCitation(
   },
   index: number,
 ): { kind: '특허문헌' | '비특허문헌'; text: string } {
-  const year = ref.pub_date ? ref.pub_date.slice(0, 10).replace(/-/g, '.') : ''
+  // pub_date holds YYYY-MM-DD; the official samples print YYYY.MM.DD with a trailing period.
+  const dateStr = ref.pub_date ? ref.pub_date.slice(0, 10).replace(/-/g, '.') : ''
   const isPatent = ref.source === 'google_patents' || ref.source === 'kipris' || ref.source === 'epo'
 
   if (isPatent) {
-    // 특허문헌: 가능한 정보로 구성 (번호/종류는 Google Patents 연동 후 보강)
-    const body = [ref.ext_id, ref.title, year].filter(Boolean).join(' ')
-    return { kind: '특허문헌', text: `[문헌${index}] ${body}` }
+    // 특허문헌: [문헌N] {번호} {종류(A 등)} ({출원인}) {YYYY.MM.DD}.
+    // 종류·출원인은 특허 DB(Google Patents/KIPRIS/EPO) 연동 후 보강 (현재는 가용 정보로 구성).
+    const body = [ref.ext_id, ref.title, dateStr].filter(Boolean).join(' ')
+    return { kind: '특허문헌', text: `[문헌${index}] ${body}${body ? '.' : ''}` }
   }
 
-  // 비특허문헌 (PubMed/OpenAlex = 논문)
-  const parts = [ref.title, year && `${year}`, ref.url].filter(Boolean)
-  return { kind: '비특허문헌', text: `[문헌${index}] ${parts.join('. ')}` }
+  // 비특허문헌 (PubMed/OpenAlex = 논문): [문헌N] 제목. 연월일. URL.
+  const body = [ref.title, dateStr || null, ref.url].filter(Boolean).join('. ')
+  return { kind: '비특허문헌', text: `[문헌${index}] ${body}${body ? '.' : ''}` }
 }
 
 // ── MVP 준수 체크리스트 (프로그램적 게이트; 주관적 "변리사에 넘길 만하다" 대체) ──

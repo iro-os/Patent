@@ -10,14 +10,27 @@ const MS_PER_DAY = 86_400_000
 export function computeGrace(disclosed: boolean, disclosureDate?: string | null): GraceInfo {
   if (!disclosed || !disclosureDate) return { disclosed: !!disclosed }
 
-  const d = new Date(`${disclosureDate}T00:00:00`)
+  // Parse the date-only value at UTC midnight (note the trailing Z). This runs in
+  // the Korean client's browser (UTC+9); without UTC the local-parse/UTC-format
+  // mismatch shifted the deadline one calendar day and could flag a still-valid
+  // §30 window as expired. All §30 math below is UTC so it is timezone-stable.
+  const d = new Date(`${disclosureDate}T00:00:00Z`)
   if (isNaN(d.getTime())) return { disclosed: true }
 
+  // §30: disclosure + 12 months (UTC month arithmetic handles year rollover).
   const deadline = new Date(d)
-  deadline.setMonth(deadline.getMonth() + 12)
+  deadline.setUTCMonth(deadline.getUTCMonth() + 12)
 
-  const today = new Date()
-  const daysRemaining = Math.floor((deadline.getTime() - today.getTime()) / MS_PER_DAY)
+  // Whole-day remaining count with both endpoints floored to UTC midnight, so the
+  // banner cannot be off by a partial day.
+  const now = new Date()
+  const todayUTC = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())
+  const deadlineUTC = Date.UTC(
+    deadline.getUTCFullYear(),
+    deadline.getUTCMonth(),
+    deadline.getUTCDate(),
+  )
+  const daysRemaining = Math.round((deadlineUTC - todayUTC) / MS_PER_DAY)
 
   return {
     disclosed: true,

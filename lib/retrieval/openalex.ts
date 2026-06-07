@@ -1,4 +1,5 @@
 import type { RetrievedRef } from '@/lib/types'
+import { fetchWithRetry } from './http'
 
 // OpenAlex (free; broad academic coverage). The polite pool wants a mailto.
 const API = 'https://api.openalex.org/works'
@@ -21,7 +22,9 @@ export async function searchOpenAlex(query: string, perPage = 15): Promise<Retri
   url.searchParams.set('per_page', String(perPage))
   url.searchParams.set('mailto', MAILTO)
 
-  const res = await fetch(url, { headers: { 'User-Agent': `patent-ai (mailto:${MAILTO})` } })
+  const res = await fetchWithRetry(url, {
+    headers: { 'User-Agent': `patent-ai (mailto:${MAILTO})` },
+  })
   if (!res.ok) return []
   const json = await res.json()
   const results: OpenAlexWork[] = json?.results ?? []

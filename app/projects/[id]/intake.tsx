@@ -229,6 +229,12 @@ export function IntakeView({
               onChange={(e) => setDisclosureDate(e.target.value)}
               className="ml-2 rounded-md border border-neutral-300 bg-transparent px-2 py-1 text-xs dark:border-neutral-700"
             />
+            {!disclosureDate && (
+              <p className="mt-2 text-xs text-amber-600">
+                최초 공개일을 입력하면 §30 유예기간(12개월)을 계산합니다. 미입력 시 유예 계산은
+                생략됩니다.
+              </p>
+            )}
             {grace?.grace_deadline && (
               <div
                 className={`mt-3 rounded-lg border p-3 text-xs ${

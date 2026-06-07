@@ -18,7 +18,18 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
   const { data: project } = await supabase.from('projects').select('*').eq('id', id).single()
   if (!project) notFound()
 
-  const [debriefRes, clarifyingRes, disclosureRes, refsRes, coverageRes] = await Promise.all([
+  const [
+    debriefRes,
+    clarifyingRes,
+    disclosureRes,
+    refsRes,
+    coverageRes,
+    overlapRes,
+    diffRes,
+    devRes,
+    claimRes,
+    usageRes,
+  ] = await Promise.all([
     supabase.from('debrief').select('*').eq('project_id', id).maybeSingle(),
     supabase
       .from('clarifying_qa')
@@ -32,9 +43,37 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
       .eq('project_id', id)
       .order('similarity', { ascending: false, nullsFirst: false }),
     supabase.from('coverage_report').select('*').eq('project_id', id).maybeSingle(),
+    supabase.from('overlap_matrix').select('element, ref_id, relation, note').eq('project_id', id),
+    supabase
+      .from('differentiation_points')
+      .select('point, supporting_ref_ids')
+      .eq('project_id', id)
+      .order('created_at'),
+    supabase
+      .from('develop_suggestions')
+      .select('suggestion, kind, rationale')
+      .eq('project_id', id)
+      .order('created_at'),
+    supabase.from('claim_strategy').select('independent_scope, dependent_ladder').eq('project_id', id).maybeSingle(),
+    supabase
+      .from('usage_log')
+      .select('cost_usd, input_tokens, output_tokens, cache_read_input_tokens')
+      .eq('project_id', id),
   ])
 
   const refs = refsRes.data ?? []
+
+  // Measured AI spend for this project (real cost, not an estimate).
+  const usageRows = usageRes.data ?? []
+  const usage = usageRows.length
+    ? {
+        cost: usageRows.reduce((s, r) => s + Number(r.cost_usd), 0),
+        input: usageRows.reduce((s, r) => s + r.input_tokens, 0),
+        output: usageRows.reduce((s, r) => s + r.output_tokens, 0),
+        cacheRead: usageRows.reduce((s, r) => s + r.cache_read_input_tokens, 0),
+        calls: usageRows.length,
+      }
+    : null
   // Show the report once research has run (even with 0 hits, so the coverage panel
   // + "다시 검색" stay visible) — keyed on status, not just on having refs.
   const researchedStatuses = ['report_ready', 'doc_generated', 'refining', 'exported']
@@ -55,7 +94,17 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
 
       <div className="mt-8">
         {showReport ? (
-          <ReportView refs={refs} coverage={coverageRes.data} disclosure={disclosureRes.data} />
+          <ReportView
+            projectId={id}
+            refs={refs}
+            coverage={coverageRes.data}
+            disclosure={disclosureRes.data}
+            overlap={overlapRes.data ?? []}
+            differentiation={diffRes.data ?? []}
+            develop={devRes.data ?? []}
+            claimStrategy={claimRes.data}
+            usage={usage}
+          />
         ) : (
           <IntakeView
             projectId={id}
