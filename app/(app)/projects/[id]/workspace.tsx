@@ -2,7 +2,12 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { toast } from 'sonner'
 import { Markdown } from '@/app/_components/markdown'
+import { Button, buttonVariants } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { cn } from '@/lib/utils'
 
 export interface Msg {
   id: string
@@ -40,6 +45,20 @@ const SOURCE_LABEL: Record<string, string> = {
   epo: 'EPO',
 }
 
+// Rotating status lines so a long wait feels alive instead of frozen.
+const CHAT_STATUS = [
+  '발명 내용을 분석하고 있어요…',
+  '명세서 관점에서 채울 수 있는 항목을 정리 중…',
+  '빠진 부분과 보강 포인트를 찾는 중…',
+  '거의 다 됐어요…',
+]
+const RESEARCH_STATUS = [
+  '전 세계 선행기술을 검색 중… (PubMed · OpenAlex)',
+  '관련 문헌을 추려내는 중…',
+  '핵심 내용을 한국어로 요약하는 중…',
+  '정리하고 있어요…',
+]
+
 export function Workspace({
   projectId,
   messages: serverMessages,
@@ -57,13 +76,10 @@ export function Workspace({
 }) {
   const router = useRouter()
 
-  // The server is the source of truth, but we render from LOCAL state so a chat turn
-  // can be appended OPTIMISTICALLY — the user's message and the AI reply show instantly,
-  // with no dependence on router.refresh() landing first. (That coupling was the bug:
-  // the first message left the EmptyState on screen and the reply only appeared if the
-  // refresh happened to repaint.) When the server's message set actually changes — a
-  // research/analysis turn is persisted, or router.refresh() brings the saved turn — we
-  // re-seed from the server below.
+  // Local render state, seeded from the server. Lets us append a chat turn optimistically
+  // (instant feedback) without waiting for router.refresh(). We re-seed whenever the
+  // server's message set actually changes (a research/analysis turn, or a refresh/poll
+  // bringing a persisted turn).
   const [msgs, setMsgs] = useState<Msg[]>(serverMessages)
   const serverSig = useMemo(() => serverMessages.map((m) => m.id).join(','), [serverMessages])
   const seededRef = useRef(serverSig)
@@ -77,20 +93,52 @@ export function Workspace({
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
   const [researching, setResearching] = useState(false)
-  const [error, setError] = useState<string | null>(null)
   const [files, setFiles] = useState<File[]>([])
   const [dragOver, setDragOver] = useState(false)
   const [showDisc, setShowDisc] = useState(false)
   const [disclosed, setDisclosed] = useState<boolean | null>(disclosure ? disclosure.disclosed : null)
   const [discDate, setDiscDate] = useState(disclosure?.disclosure_date ?? '')
 
-  const scrollRef = useRef<HTMLDivElement>(null)
-  // Show the welcome/dropzone only when there is genuinely nothing happening yet.
-  const empty = msgs.length === 0 && !sending && !researching
-
+  // Navigation resilience: if the session's last persisted turn is an unanswered user
+  // message, the assistant is being generated server-side (the route persists the user
+  // message before calling the model). Poll until the reply lands, so leaving and
+  // returning to a session mid-generation still shows the answer.
+  const lastServer = serverMessages[serverMessages.length - 1]
+  const pendingId = lastServer && lastServer.role === 'user' ? lastServer.id : null
+  // Derived (not stored) so the effect body holds no synchronous setState. The timeout
+  // is keyed to the pending message id, so a new pending turn is never stale.
+  const [timedOutFor, setTimedOutFor] = useState<string | null>(null)
+  const pollTimedOut = pendingId !== null && timedOutFor === pendingId
+  const pollPending = pendingId !== null && !pollTimedOut
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })
-  }, [msgs.length, sending, researching])
+    if (!pendingId || timedOutFor === pendingId) return
+    let tries = 0
+    const iv = setInterval(() => {
+      tries++
+      if (tries >= 35) {
+        clearInterval(iv)
+        setTimedOutFor(pendingId) // give up after ~2 min (set inside a timer callback — safe)
+        return
+      }
+      router.refresh()
+    }, 3500)
+    return () => clearInterval(iv)
+  }, [pendingId, timedOutFor, router])
+
+  const busy = sending || researching || pollPending
+  // Welcome/dropzone only when nothing is happening yet.
+  const empty = msgs.length === 0 && !busy
+
+  // Scroll: jump instantly to the bottom on mount (no "scroll through everything"
+  // animation when opening a session); smooth-scroll only for subsequent updates.
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const didInitialScroll = useRef(false)
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    el.scrollTo({ top: el.scrollHeight, behavior: didInitialScroll.current ? 'smooth' : 'auto' })
+    didInitialScroll.current = true
+  }, [msgs.length, busy])
 
   const addFiles = (list: FileList | null) => {
     if (list) setFiles((prev) => [...prev, ...Array.from(list)])
@@ -104,8 +152,8 @@ export function Workspace({
         ? `${text}\n\n[첨부: ${files.map((f) => f.name).join(', ')} — 파싱은 Phase 2]`
         : text
 
-    // Optimistic user bubble — instant feedback (the temp id is replaced when the
-    // server's persisted turn re-seeds via the effect above).
+    // Optimistic user bubble (instant). The temp id is replaced by the persisted row
+    // when the server state re-seeds.
     const tempId = `tmp-${Date.now()}`
     const optimistic: Msg = {
       id: tempId,
@@ -116,7 +164,6 @@ export function Workspace({
       created_at: new Date().toISOString(),
     }
     setSending(true)
-    setError(null)
     setInput('')
     setFiles([])
     setMsgs((prev) => [...prev, optimistic])
@@ -129,23 +176,19 @@ export function Workspace({
       })
       const json = await res.json().catch(() => ({}))
       if (!res.ok) {
-        setError(json.message ?? json.error ?? '응답 생성에 실패했습니다.')
-        setInput(text) // restore so the user doesn't lose their message
-        setMsgs((prev) => prev.filter((m) => m.id !== tempId)) // roll back the optimistic bubble
+        // The user message is persisted server-side; keep the bubble and toast the error.
+        // We deliberately do NOT refresh here, so the failed turn doesn't trip the
+        // pending-poll. The user can simply send again.
+        toast.error(json.message ?? json.error ?? '응답 생성에 실패했습니다. 다시 시도해 주세요.')
         return
       }
-      // Append the AI reply immediately from the response (no refresh needed for chat).
       if (json.message) {
         const reply = { ...(json.message as Msg), data: (json.message as Msg).data ?? {} }
         setMsgs((prev) => [...prev, reply])
       }
-      // Sync the sidebar title + right-pane debrief in the background. This does NOT
-      // gate the conversation appearing.
-      router.refresh()
-    } catch (e) {
-      setError(String(e))
-      setInput(text)
-      setMsgs((prev) => prev.filter((m) => m.id !== tempId))
+      router.refresh() // sync sidebar title + right-pane debrief; reconcile ids
+    } catch {
+      toast.error('네트워크 오류로 전송에 실패했습니다. 다시 시도해 주세요.')
     } finally {
       setSending(false)
     }
@@ -154,7 +197,6 @@ export function Workspace({
   const runResearch = async () => {
     setShowDisc(false)
     setResearching(true)
-    setError(null)
     try {
       const res = await fetch('/api/research/fast', {
         method: 'POST',
@@ -167,13 +209,12 @@ export function Workspace({
       })
       const json = await res.json().catch(() => ({}))
       if (!res.ok) {
-        setError(json.message ?? json.error ?? '선행기술 검색에 실패했습니다.')
+        toast.error(json.message ?? json.error ?? '선행기술 검색에 실패했습니다.')
         return
       }
-      // The research turn is persisted server-side; refresh re-seeds msgs (effect above).
       router.refresh()
-    } catch (e) {
-      setError(String(e))
+    } catch {
+      toast.error('네트워크 오류로 검색에 실패했습니다.')
     } finally {
       setResearching(false)
     }
@@ -198,9 +239,10 @@ export function Workspace({
                   coverage={m.id === lastResearchId ? coverage : null}
                 />
               ))}
-              {(sending || researching) && (
-                <p className="text-sm text-neutral-400">
-                  {researching ? '선행기술 검색 중… (PubMed · OpenAlex)' : 'AI가 생각 중…'}
+              {busy && <ThinkingIndicator mode={researching ? 'research' : 'chat'} />}
+              {pollTimedOut && !busy && (
+                <p className="text-sm text-amber-600">
+                  응답이 지연되고 있어요. 메시지를 다시 보내보세요.
                 </p>
               )}
             </div>
@@ -211,8 +253,6 @@ export function Workspace({
       {/* ── Composer ──────────────────────────────────────────────────────── */}
       <div className="border-t border-neutral-200 bg-white/70 px-6 py-3 backdrop-blur dark:border-neutral-800 dark:bg-neutral-950/60">
         <div className="mx-auto max-w-2xl">
-          {error && <p className="mb-2 text-sm text-red-500">{error}</p>}
-
           {files.length > 0 && (
             <div className="mb-2 flex flex-wrap gap-1.5">
               {files.map((f, i) => (
@@ -253,37 +293,30 @@ export function Workspace({
             />
             <div className="flex items-center justify-between gap-2 px-1">
               <div className="flex items-center gap-1.5">
-                <label className="cursor-pointer rounded-lg border border-neutral-300 px-2.5 py-1.5 text-xs text-neutral-500 transition hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-900">
+                <label className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'cursor-pointer')}>
                   <input type="file" multiple className="hidden" onChange={(e) => addFiles(e.target.files)} />
                   + 첨부
                 </label>
-                <div className="relative">
-                  <button
-                    onClick={() => setShowDisc((v) => !v)}
-                    disabled={researching}
-                    className="rounded-lg border border-neutral-300 px-2.5 py-1.5 text-xs transition hover:bg-neutral-50 disabled:opacity-50 dark:border-neutral-700 dark:hover:bg-neutral-900"
-                  >
-                    {researching ? '검색 중…' : '🔍 심층 리서치'}
-                  </button>
-                  {showDisc && (
-                    <DisclosurePopover
+                <Popover open={showDisc} onOpenChange={setShowDisc}>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline" size="sm" disabled={researching}>
+                      {researching ? '검색 중…' : '🔍 심층 리서치'}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent align="start" side="top" className="w-72">
+                    <DisclosureForm
                       disclosed={disclosed}
                       setDisclosed={setDisclosed}
                       discDate={discDate}
                       setDiscDate={setDiscDate}
                       onRun={runResearch}
-                      onClose={() => setShowDisc(false)}
                     />
-                  )}
-                </div>
+                  </PopoverContent>
+                </Popover>
               </div>
-              <button
-                onClick={send}
-                disabled={sending || !input.trim()}
-                className="rounded-lg bg-neutral-900 px-4 py-1.5 text-sm font-medium text-white transition hover:opacity-90 disabled:opacity-40 dark:bg-white dark:text-neutral-900"
-              >
+              <Button onClick={send} disabled={sending || !input.trim()} size="sm">
                 전송
-              </button>
+              </Button>
             </div>
           </div>
           <div className="mt-1.5 flex items-center justify-between gap-3 px-1 text-[11px] text-neutral-400">
@@ -296,6 +329,25 @@ export function Workspace({
           </div>
         </div>
       </div>
+    </div>
+  )
+}
+
+// Pulsing avatar + rotating status line so long waits feel alive.
+function ThinkingIndicator({ mode }: { mode: 'chat' | 'research' }) {
+  const lines = mode === 'research' ? RESEARCH_STATUS : CHAT_STATUS
+  const [i, setI] = useState(0)
+  useEffect(() => {
+    const iv = setInterval(() => setI((x) => (x + 1) % lines.length), 3500)
+    return () => clearInterval(iv)
+  }, [lines.length])
+  return (
+    <div className="flex items-center gap-3">
+      <span className="relative flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-neutral-900 text-[10px] font-semibold text-white dark:bg-white dark:text-neutral-900">
+        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-neutral-900/30 dark:bg-white/30" />
+        AI
+      </span>
+      <span className="animate-pulse text-sm text-neutral-500">{lines[i]}</span>
     </div>
   )
 }
@@ -459,59 +511,55 @@ function ResearchTurn({
   )
 }
 
-function DisclosurePopover({
+// Disclosure form rendered inside a shadcn Popover (Popover handles the backdrop,
+// positioning, outside-click and focus — so this is just the form body now).
+function DisclosureForm({
   disclosed,
   setDisclosed,
   discDate,
   setDiscDate,
   onRun,
-  onClose,
 }: {
   disclosed: boolean | null
   setDisclosed: (v: boolean) => void
   discDate: string
   setDiscDate: (v: string) => void
   onRun: () => void
-  onClose: () => void
 }) {
   return (
-    <>
-      <div className="fixed inset-0 z-10" onClick={onClose} />
-      <div className="absolute bottom-10 left-0 z-20 w-72 rounded-xl border border-neutral-200 bg-white p-3 text-left shadow-lg dark:border-neutral-700 dark:bg-neutral-900">
-        <p className="text-xs font-medium">출원 전 공개(논문·발표·판매)가 있었나요? (§30)</p>
-        <div className="mt-2 flex gap-2">
-          <button
-            onClick={() => setDisclosed(false)}
-            className={`rounded-full border px-2.5 py-1 text-xs ${disclosed === false ? 'border-neutral-900 bg-neutral-900 text-white dark:border-white dark:bg-white dark:text-neutral-900' : 'border-neutral-300 dark:border-neutral-700'}`}
-          >
-            아니오
-          </button>
-          <button
-            onClick={() => setDisclosed(true)}
-            className={`rounded-full border px-2.5 py-1 text-xs ${disclosed === true ? 'border-neutral-900 bg-neutral-900 text-white dark:border-white dark:bg-white dark:text-neutral-900' : 'border-neutral-300 dark:border-neutral-700'}`}
-          >
-            예
-          </button>
-        </div>
-        {disclosed && (
-          <div className="mt-2">
-            <label className="text-[11px] text-neutral-500">최초 공개일</label>
-            <input
-              type="date"
-              value={discDate}
-              onChange={(e) => setDiscDate(e.target.value)}
-              className="ml-2 rounded-md border border-neutral-300 bg-transparent px-2 py-1 text-xs dark:border-neutral-700"
-            />
-          </div>
-        )}
-        <button
-          onClick={onRun}
-          className="mt-3 w-full rounded-lg bg-neutral-900 px-3 py-1.5 text-xs font-medium text-white transition hover:opacity-90 dark:bg-white dark:text-neutral-900"
+    <div className="text-left">
+      <p className="text-xs font-medium">출원 전 공개(논문·발표·판매)가 있었나요? (§30)</p>
+      <div className="mt-2 flex gap-2">
+        <Button
+          variant={disclosed === false ? 'default' : 'outline'}
+          size="sm"
+          onClick={() => setDisclosed(false)}
         >
-          선행기술 검색 시작 (무료)
-        </button>
+          아니오
+        </Button>
+        <Button
+          variant={disclosed === true ? 'default' : 'outline'}
+          size="sm"
+          onClick={() => setDisclosed(true)}
+        >
+          예
+        </Button>
       </div>
-    </>
+      {disclosed && (
+        <div className="mt-3 grid gap-1.5">
+          <label className="text-[11px] text-neutral-500">최초 공개일</label>
+          <Input
+            type="date"
+            value={discDate}
+            onChange={(e) => setDiscDate(e.target.value)}
+            className="h-8"
+          />
+        </div>
+      )}
+      <Button onClick={onRun} size="sm" className="mt-3 w-full">
+        선행기술 검색 시작 (무료)
+      </Button>
+    </div>
   )
 }
 

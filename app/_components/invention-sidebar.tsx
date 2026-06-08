@@ -3,6 +3,35 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
+import { toast } from 'sonner'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 
 export interface Invention {
   id: string
@@ -36,56 +65,72 @@ export function InventionSidebar({
   const activeId =
     pathname && pathname.startsWith('/projects/') ? pathname.split('/')[2] ?? null : null
 
-  const [openMenu, setOpenMenu] = useState<string | null>(null)
-  const [editingId, setEditingId] = useState<string | null>(null)
-  const [editTitle, setEditTitle] = useState('')
   const [creating, setCreating] = useState(false)
   const [busy, setBusy] = useState(false)
+  // Invention queued for deletion — drives the confirmation dialog (replaces window.confirm).
+  const [pendingDelete, setPendingDelete] = useState<Invention | null>(null)
+  // Rename / group-move share one dialog (replaces inline editing + window.prompt).
+  const [editTarget, setEditTarget] = useState<{ inv: Invention; field: 'title' | 'group' } | null>(
+    null,
+  )
+  const [editValue, setEditValue] = useState('')
 
   const patch = async (id: string, body: Record<string, unknown>) => {
     setBusy(true)
     try {
-      await fetch(`/api/projects/${id}`, {
+      const res = await fetch(`/api/projects/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       })
+      if (!res.ok) throw new Error('patch failed')
       router.refresh()
+    } catch {
+      toast.error('변경에 실패했습니다.', { description: '잠시 후 다시 시도해 주세요.' })
     } finally {
       setBusy(false)
-      setOpenMenu(null)
     }
   }
 
-  const remove = async (id: string) => {
-    setOpenMenu(null)
-    if (!confirm('이 발명을 삭제할까요? 관련 리서치·분석 데이터까지 모두 삭제되며 되돌릴 수 없습니다.')) return
+  // Open the confirmation dialog instead of a native window.confirm().
+  const requestDelete = (inv: Invention) => setPendingDelete(inv)
+
+  const confirmDelete = async () => {
+    const inv = pendingDelete
+    if (!inv) return
+    setPendingDelete(null)
     setBusy(true)
     try {
-      await fetch(`/api/projects/${id}`, { method: 'DELETE' })
-      if (id === activeId) router.push('/')
+      const res = await fetch(`/api/projects/${inv.id}`, { method: 'DELETE' })
+      if (!res.ok) throw new Error('delete failed')
+      if (inv.id === activeId) router.push('/')
       router.refresh() // sidebar persists across nav; refresh the layout to drop the row
+      toast.success('발명을 삭제했습니다.', { description: inv.title })
+    } catch {
+      toast.error('삭제에 실패했습니다.', { description: '잠시 후 다시 시도해 주세요.' })
     } finally {
       setBusy(false)
     }
-  }
-
-  const moveGroup = (inv: Invention) => {
-    setOpenMenu(null)
-    const g = window.prompt('그룹 이름 (비우면 그룹 해제)', inv.group_name ?? '')
-    if (g === null) return
-    patch(inv.id, { group_name: g })
   }
 
   const startRename = (inv: Invention) => {
-    setOpenMenu(null)
-    setEditingId(inv.id)
-    setEditTitle(inv.title)
+    setEditValue(inv.title)
+    setEditTarget({ inv, field: 'title' })
   }
-  const commitRename = (id: string) => {
-    const t = editTitle.trim()
-    setEditingId(null)
-    if (t) patch(id, { title: t })
+  const startGroup = (inv: Invention) => {
+    setEditValue(inv.group_name ?? '')
+    setEditTarget({ inv, field: 'group' })
+  }
+  const submitEdit = () => {
+    if (!editTarget) return
+    const { inv, field } = editTarget
+    const v = editValue.trim()
+    setEditTarget(null)
+    if (field === 'title') {
+      if (v && v !== inv.title) patch(inv.id, { title: v })
+    } else if (v !== (inv.group_name ?? '')) {
+      patch(inv.id, { group_name: v }) // empty string clears the group
+    }
   }
 
   const newInvention = async () => {
@@ -96,7 +141,11 @@ export function InventionSidebar({
       if (json.id) {
         router.push(`/projects/${json.id}`)
         router.refresh() // refresh the layout so the new invention appears in this sidebar
+      } else {
+        toast.error('새 발명 생성에 실패했습니다.')
       }
+    } catch {
+      toast.error('새 발명 생성에 실패했습니다.')
     } finally {
       // The sidebar persists across navigation, so we must reset this explicitly.
       setCreating(false)
@@ -119,63 +168,48 @@ export function InventionSidebar({
   const Row = (inv: Invention) => {
     const active = inv.id === activeId
     return (
-      <li key={inv.id} className="relative">
+      <li key={inv.id}>
         <div
           className={`group flex items-center gap-1 rounded-lg pr-1 transition ${
             active ? 'bg-neutral-200/70 dark:bg-neutral-800' : 'hover:bg-neutral-100 dark:hover:bg-neutral-900'
           }`}
         >
-          {editingId === inv.id ? (
-            <input
-              autoFocus
-              value={editTitle}
-              onChange={(e) => setEditTitle(e.target.value)}
-              onBlur={() => commitRename(inv.id)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') commitRename(inv.id)
-                if (e.key === 'Escape') setEditingId(null)
-              }}
-              className="m-1 w-full rounded border border-neutral-300 bg-white px-2 py-1 text-sm outline-none dark:border-neutral-600 dark:bg-neutral-950"
-            />
-          ) : (
-            <Link
-              href={`/projects/${inv.id}`}
-              className="flex min-w-0 flex-1 items-center justify-between px-2.5 py-2"
-            >
-              <span className="truncate text-sm">{inv.title}</span>
-              <span className="ml-2 shrink-0 text-[10px] text-neutral-400">
-                {STATUS_LABEL[inv.status] ?? inv.status}
-              </span>
-            </Link>
-          )}
-          <button
-            aria-label="메뉴"
-            onClick={() => setOpenMenu(openMenu === inv.id ? null : inv.id)}
-            className="shrink-0 rounded p-1 text-neutral-400 opacity-0 transition hover:bg-neutral-200 group-hover:opacity-100 dark:hover:bg-neutral-700"
+          <Link
+            href={`/projects/${inv.id}`}
+            className="flex min-w-0 flex-1 items-center justify-between px-2.5 py-2"
           >
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-              <circle cx="8" cy="3" r="1.4" />
-              <circle cx="8" cy="8" r="1.4" />
-              <circle cx="8" cy="13" r="1.4" />
-            </svg>
-          </button>
-        </div>
+            <span className="truncate text-sm">{inv.title}</span>
+            <span className="ml-2 shrink-0 text-[10px] text-neutral-400">
+              {STATUS_LABEL[inv.status] ?? inv.status}
+            </span>
+          </Link>
 
-        {openMenu === inv.id && (
-          <>
-            <div className="fixed inset-0 z-10" onClick={() => setOpenMenu(null)} />
-            <div className="absolute right-1 top-9 z-20 w-40 overflow-hidden rounded-lg border border-neutral-200 bg-white py-1 text-sm shadow-lg dark:border-neutral-700 dark:bg-neutral-900">
-              <MenuItem onClick={() => startRename(inv)}>이름 변경</MenuItem>
-              <MenuItem onClick={() => patch(inv.id, { pinned: !inv.pinned })}>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                aria-label="메뉴"
+                className="shrink-0 rounded p-1 text-neutral-400 opacity-0 transition hover:bg-neutral-200 group-hover:opacity-100 data-[state=open]:opacity-100 dark:hover:bg-neutral-700"
+              >
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                  <circle cx="8" cy="3" r="1.4" />
+                  <circle cx="8" cy="8" r="1.4" />
+                  <circle cx="8" cy="13" r="1.4" />
+                </svg>
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-40">
+              <DropdownMenuItem onSelect={() => startRename(inv)}>이름 변경</DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => patch(inv.id, { pinned: !inv.pinned })}>
                 {inv.pinned ? '핀 해제' : '핀 고정'}
-              </MenuItem>
-              <MenuItem onClick={() => moveGroup(inv)}>그룹 이동</MenuItem>
-              <MenuItem danger onClick={() => remove(inv.id)}>
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => startGroup(inv)}>그룹 이동</DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem variant="destructive" onSelect={() => requestDelete(inv)}>
                 삭제
-              </MenuItem>
-            </div>
-          </>
-        )}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
       </li>
     )
   }
@@ -189,13 +223,9 @@ export function InventionSidebar({
       </div>
 
       <div className="px-3">
-        <button
-          onClick={newInvention}
-          disabled={creating || busy}
-          className="w-full rounded-lg bg-neutral-900 px-3 py-2 text-sm font-medium text-white transition hover:opacity-90 disabled:opacity-50 dark:bg-white dark:text-neutral-900"
-        >
+        <Button onClick={newInvention} disabled={creating || busy} className="w-full">
           {creating ? '생성 중…' : '+ 새 발명'}
-        </button>
+        </Button>
       </div>
 
       <nav className="mt-4 flex-1 space-y-4 overflow-y-auto px-3 pb-4">
@@ -224,27 +254,62 @@ export function InventionSidebar({
           <button className="mt-1 text-xs text-neutral-400 transition hover:text-neutral-600">로그아웃</button>
         </form>
       </div>
-    </aside>
-  )
-}
 
-function MenuItem({
-  children,
-  onClick,
-  danger,
-}: {
-  children: React.ReactNode
-  onClick: () => void
-  danger?: boolean
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className={`block w-full px-3 py-1.5 text-left transition hover:bg-neutral-100 dark:hover:bg-neutral-800 ${
-        danger ? 'text-red-600 dark:text-red-400' : ''
-      }`}
-    >
-      {children}
-    </button>
+      {/* Rename / group-move dialog (shared) */}
+      <Dialog open={editTarget !== null} onOpenChange={(o) => !o && setEditTarget(null)}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>{editTarget?.field === 'title' ? '이름 변경' : '그룹 이동'}</DialogTitle>
+            <DialogDescription>
+              {editTarget?.field === 'title'
+                ? '발명의 이름을 수정합니다.'
+                : '그룹 이름을 입력하세요. 비우면 그룹에서 해제됩니다.'}
+            </DialogDescription>
+          </DialogHeader>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault()
+              submitEdit()
+            }}
+            className="grid gap-4"
+          >
+            <div className="grid gap-2">
+              <Label htmlFor="edit-value">{editTarget?.field === 'title' ? '이름' : '그룹'}</Label>
+              <Input
+                id="edit-value"
+                autoFocus
+                value={editValue}
+                onChange={(e) => setEditValue(e.target.value)}
+                placeholder={editTarget?.field === 'group' ? '예: 의료기기' : ''}
+              />
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setEditTarget(null)}>
+                취소
+              </Button>
+              <Button type="submit">저장</Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete confirmation */}
+      <AlertDialog open={pendingDelete !== null} onOpenChange={(o) => !o && setPendingDelete(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>이 발명을 삭제할까요?</AlertDialogTitle>
+            <AlertDialogDescription>
+              “{pendingDelete?.title}”의 관련 리서치·분석 데이터까지 모두 삭제되며 되돌릴 수 없습니다.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>취소</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={confirmDelete}>
+              삭제
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </aside>
   )
 }
