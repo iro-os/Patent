@@ -112,12 +112,29 @@ export async function POST(req: Request) {
         : null,
   }
 
+  // Persist the user message FIRST so the turn is durable. If the user navigates away
+  // while the model is generating, the message is not lost — the route still runs to
+  // completion server-side, and any client viewing the session detects the pending
+  // (unanswered) user turn and polls for the reply. This is what makes in-flight
+  // processing resilient to navigation.
+  const { data: userRow, error: userErr } = await supabase
+    .from('messages')
+    .insert({ project_id: projectId, role: 'user', kind: 'text', content: message })
+    .select('id')
+    .single()
+  if (userErr || !userRow) {
+    console.error('chat user-message insert failed:', userErr?.message)
+    return NextResponse.json({ error: 'persist_failed' }, { status: 500 })
+  }
+
   let turn
   try {
     turn = await chatTurn({ history, userMessage: message, context }, (u) =>
       recordUsage(supabase, { projectId, operation: 'chat' }, u),
     )
   } catch (e) {
+    // Leave the user message persisted (input preserved); the turn is simply left
+    // unanswered and the user can retry by sending again.
     if (e instanceof MissingKeyError) {
       return NextResponse.json(
         { error: 'ANTHROPIC_API_KEY_MISSING', message: 'Anthropic API 키가 설정되지 않았습니다.' },
@@ -131,14 +148,7 @@ export async function POST(req: Request) {
   const u = turn.understanding
   let assistant: { id: string; role: string; kind: string; content: string; created_at: string }
   try {
-    // Persist the user turn, refresh the debrief, persist the assistant turn.
-    must(
-      await supabase
-        .from('messages')
-        .insert({ project_id: projectId, role: 'user', kind: 'text', content: message }),
-      'user message insert',
-    )
-
+    // Refresh the debrief, then persist the assistant turn.
     must(
       await supabase.from('debrief').upsert(
         {

@@ -50,7 +50,7 @@ const SYSTEM = `당신은 대한민국 특허 실무(KIPO)에 정통한 변리�
 - 협업자처럼 굴고, 문지기처럼 굴지 마세요. 사용자의 요청을 먼저 충실히 들어준 뒤, 필요한 것을 제안하세요.
 - 확인 질문은 "강제"가 아니라 "선택적 제안"입니다. 사용자가 일부만 답하거나, 건너뛰거나, "그냥 진행해/요약해줘"라고 하면 그 의사를 존중하고 가진 정보로 진행하세요. 답하지 않은 항목을 이유로 작업을 거부하지 마세요.
 - 정보가 부족하면 합리적 '가정'을 명시(가정은 '추정'으로)하고 전진하세요. 멈추기보다 도움 되는 다음 결과물을 내놓으세요.
-- reply_ko 구성: (1) 사용자의 말/요청에 대한 직접적 응답을 먼저, (2) 필요할 때만 짧은 확인 질문을 '- ' 리스트로(최대 3개, 선택 사항임을 분명히), (3) 자연스러운 다음 단계 한 줄 제안. 카드/버튼이 아니라 대화체.
+- reply_ko 구성: (1) 사용자의 말/요청에 직접 응답하되 **충실하게** — 발명자가 곧바로 다음 행동(초안 보강)을 할 수 있도록 실질적 내용을 담으세요. 너무 짧게 끝내지 마세요. (2) 도움이 되면 짧은 확인 질문을 '- ' 리스트로(최대 3개, 선택 사항임을 분명히), (3) 자연스러운 다음 단계 제안. 카드/버튼이 아니라 대화체이되, 표·리스트로 가독성을 높이세요.
 
 [현재 프로젝트 상태 — 매우 중요]
 - 시스템이 별도 블록으로 "현재 프로젝트 상태"(발명 이해/선행기술 리서치 결과/차별점 분석)를 제공합니다. 이는 이미 실제로 저장된 사실입니다.
@@ -67,6 +67,14 @@ const SYSTEM = `당신은 대한민국 특허 실무(KIPO)에 정통한 변리�
 3) ready_for_research (위 기준)
 
 이것은 법률 자문이 아니며 최종본은 변리사 검토가 필요합니다(필요 시 한 번만 간단히 고지하고 반복하지 마세요). 모든 출력은 한국어.`
+
+// Injected only on the very first turn — the user has just dropped their idea/materials
+// and needs a substantive draft-readiness diagnosis, not a one-liner.
+const FIRST_TURN_DIRECTIVE = `[첫 턴 특별 지침] 이번이 이 발명의 첫 메시지입니다. 짧게 답하지 말고, 발명자가 출원서 초안을 채울 수 있도록 명세서 관점에서 충실히 진단하세요:
+1) ✅ **지금 채울 수 있는 항목** — 제공된 설명/자료만으로 작성 가능한 명세서 부분(발명의 명칭·기술분야·해결 과제·과제의 해결 수단·발명의 효과 등)을 구체적으로 짚고, 가능하면 핵심 문장을 미리 제안.
+2) ⚠️ **아직 못 채우는 항목** — 정보가 부족해 비는 부분과, 그게 왜 필요한지.
+3) 💪 **더 강하게 만들 부분** — 진보성·차별성을 높이려면 보강할 지점과, 그를 위해 답하면 좋은 구체 질문(선택 사항).
+표나 리스트로 스캔하기 쉽게 구성하세요. 확인 질문은 여전히 선택임을 분명히 하고, 사용자가 건너뛰어도 진행 가능함을 알리세요.`
 
 const INPUT_SCHEMA: Anthropic.Tool['input_schema'] = {
   type: 'object',
@@ -192,6 +200,10 @@ export async function chatTurn(
   let systemContext = buildStateContext(opts.context)
   if (trimmed && systemContext) {
     systemContext += `\n\n(이전 ${full.length - kept.length}개 대화 메시지는 위 '현재 프로젝트 상태'에 누적 반영됨 — 최근 ${kept.length}개만 원문으로 첨부.)`
+  }
+  // First message of a session → ask for a full draft-readiness diagnosis, not a one-liner.
+  if (full.length === 0) {
+    systemContext = systemContext ? `${systemContext}\n\n${FIRST_TURN_DIRECTIVE}` : FIRST_TURN_DIRECTIVE
   }
 
   const out = await runTool<{
