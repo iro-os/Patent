@@ -180,6 +180,24 @@ export async function POST(req: Request) {
       'status report_ready',
     )
 
+    // Timeline turn so the research shows in the chat (best-effort — non-fatal).
+    const summary = uniqueRefRows.length
+      ? `선행기술 ${uniqueRefRows.length}건을 찾았습니다 (PubMed·OpenAlex). 아래 결과를 확인하세요.`
+      : '선행기술 검색 결과가 0건입니다. 검색어를 구체화하거나 변리사 검토가 필요합니다.'
+    const msgRes = await supabase.from('messages').insert({
+      project_id: projectId,
+      role: 'assistant',
+      kind: 'research',
+      content: summary,
+      data: {
+        count: uniqueRefRows.length,
+        sources: coverage.sources_searched,
+        screened: coverage.screened_count,
+        blind_spots: coverage.blind_spots,
+      },
+    })
+    if (msgRes.error) console.error('research message insert failed:', msgRes.error.message)
+
     return NextResponse.json({
       ok: true,
       count: uniqueRefRows.length,

@@ -168,6 +168,16 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'persist_failed' }, { status: 500 })
   }
 
+  // Timeline turn so the draft generation shows in the chat (best-effort — non-fatal).
+  const aMsg = await supabase.from('messages').insert({
+    project_id: projectId,
+    role: 'assistant',
+    kind: 'analysis',
+    content: '출원서 초안(차별성 분석·청구 전략)을 작성/갱신했습니다. 우측 패널에서 확인하세요.',
+    data: { elements: overlapRows.length, differentiation_points: diffRows.length },
+  })
+  if (aMsg.error) console.error('analysis message insert failed:', aMsg.error.message)
+
   return NextResponse.json({
     ok: true,
     elements: overlapRows.length,

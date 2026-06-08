@@ -40,6 +40,8 @@ const SYSTEM = `당신은 대한민국 특허 실무(KIPO)에 정통한 변리�
 - develop_suggestions: 진보성을 강화하기 위해 발명자가 보강할 것 — kind는 'experiment'(실험) / 'data'(데이터) / 'design'(설계). 각 rationale 포함.
 - claim_strategy: independent_scope(독립항을 얼마나 넓게 쓸 수 있는지, 선행기술 중복으로 인한 제약 포함) + dependent_ladder(살아남은 차별점들로 구성한 종속항 사다리, 넓은→좁은 순서).
 
+분량(간결성): 핵심에 집중해 과도하게 길게 쓰지 마세요 — elements는 핵심 구성요소 위주, differentiation_points 최대 8개, develop_suggestions 최대 6개, 각 note/rationale은 1~2문장.
+
 주의: 본 분석은 신규성/진보성(특허성)만 다루며, 침해(FTO)는 다루지 않습니다. 법률 자문이 아닙니다. 모든 출력은 한국어로 작성합니다.`
 
 const INPUT_SCHEMA: Anthropic.Tool['input_schema'] = {
@@ -129,7 +131,9 @@ ${refList}`
     toolName: 'submit_differentiation',
     toolDescription: '발명 구성요소별 차별성 분석, 차별점, 디벨롭 제안, 청구 전략을 제출합니다.',
     inputSchema: INPUT_SCHEMA,
-    maxTokens: 3500,
+    // Large structured output (elements + 차별점 + 보강제안 + 청구전략); give ample
+    // headroom so it never trips the max_tokens truncation guard (which fails the turn).
+    maxTokens: 8000,
     onUsage,
   })
 }

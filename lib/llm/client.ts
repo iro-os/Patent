@@ -31,11 +31,18 @@ export function getAnthropic(): Anthropic {
 // This is far more reliable than parsing free-text JSON from the model.
 export async function runTool<T>(opts: {
   system: string
-  user: string
+  // Provide EITHER a single user string OR a full multi-turn message list (for chat).
+  user?: string
+  messages?: Anthropic.MessageParam[]
   toolName: string
   toolDescription: string
   inputSchema: Anthropic.Tool['input_schema']
   maxTokens?: number
+  // Dynamic, per-request context appended as a SECOND system block (never cached,
+  // since it changes every turn). Used by chat to make the model aware of the
+  // persisted project state (prior-art results, analysis) so it never claims work
+  // that was actually done "wasn't done".
+  systemContext?: string
   // Telemetry: invoked with the call's measured token usage (auto cost logging).
   onUsage?: (usage: UsageRecord) => void | Promise<void>
   // Cache the tools+system prefix (default true). Prefix-match caching only fires
@@ -44,16 +51,24 @@ export async function runTool<T>(opts: {
   cachePrompt?: boolean
 }): Promise<T> {
   const anthropic = getAnthropic()
-  const system: Anthropic.TextBlockParam[] | string =
+  const system: Anthropic.TextBlockParam[] = [
     opts.cachePrompt === false
-      ? opts.system
-      : [{ type: 'text', text: opts.system, cache_control: { type: 'ephemeral' } }]
+      ? { type: 'text', text: opts.system }
+      : { type: 'text', text: opts.system, cache_control: { type: 'ephemeral' } },
+  ]
+  // Append the dynamic project-state context as its own uncached block.
+  if (opts.systemContext?.trim()) {
+    system.push({ type: 'text', text: opts.systemContext })
+  }
+
+  const messages: Anthropic.MessageParam[] =
+    opts.messages ?? [{ role: 'user', content: opts.user ?? '' }]
 
   const res = await anthropic.messages.create({
     model: MODEL,
     max_tokens: opts.maxTokens ?? 2048,
     system,
-    messages: [{ role: 'user', content: opts.user }],
+    messages,
     tools: [
       { name: opts.toolName, description: opts.toolDescription, input_schema: opts.inputSchema },
     ],
