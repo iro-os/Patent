@@ -95,6 +95,48 @@ export const KIPO_SECTIONS: KipoSection[] = [
 export type KipoSectionKey = string
 export const KIPO_SECTION_KEYS = KIPO_SECTIONS.map((s) => s.key)
 
+// ── UI 아웃라인 (출원서 초안 '목차' 탭) ──────────────────────────────────────
+// 문서 export 순서는 위 KIPO_SECTIONS(공식 별지15호)를 따르되, 화면 목차는 발명자에게
+// 친화적인 그룹으로 보여준다. (UI 그룹핑 ≠ 출력 문서 순서)
+//  - 도면의 간단한 설명·부호의 설명·발명을 실시하기 위한 구체적인 내용을 '발명의 내용'에 묶음
+//  - 특허청구범위를 독립 그룹으로 (법적 핵심이라 항상 노출)
+//  - 요약서 / 대표도면 / 도면을 분리
+//  - 선택 항목은 접이식 '추가 항목 (선택)' 그룹으로 보관
+export interface OutlineGroup {
+  group: string
+  items: { key: string }[]
+  optional?: boolean // 기본 접힘 ('추가 항목 (선택)')
+}
+export const SPEC_OUTLINE: OutlineGroup[] = [
+  { group: '발명의 설명', items: [{ key: '발명의 명칭' }, { key: '기술분야' }, { key: '배경기술' }] },
+  {
+    group: '발명의 내용',
+    items: [
+      { key: '해결하고자 하는 과제' },
+      { key: '과제의 해결 수단' },
+      { key: '발명의 효과' },
+      { key: '도면의 간단한 설명' },
+      { key: '부호의 설명' },
+      { key: '발명을 실시하기 위한 구체적인 내용' },
+    ],
+  },
+  { group: '특허청구범위', items: [{ key: '특허청구범위' }] },
+  { group: '요약서', items: [{ key: '요약' }] },
+  { group: '대표도면', items: [{ key: '대표도면' }] },
+  { group: '도면', items: [{ key: '도면' }] },
+  {
+    group: '추가 항목 (선택)',
+    optional: true,
+    items: [
+      { key: '선행기술문헌' },
+      { key: '실시예' },
+      { key: '산업상 이용가능성' },
+      { key: '수탁번호' },
+      { key: '서열목록 자유텍스트' },
+    ],
+  },
+]
+
 // ── 요약서 (별지 제16호 서식) — 명세서와 별도 서식 ──────────────────────────
 export const KIPO_ABSTRACT = {
   key: '요약서',
