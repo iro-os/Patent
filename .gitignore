@@ -46,3 +46,6 @@ next-env.d.ts
 resource/exemplars/pdf/
 resource/특허 제출 자료 예시/
 resource/특허 제출 자료 서식/
+
+# 야간 자율 개선 루프 스크래치(백로그/진행 로그). 결과물(코드/docs/)은 별도 커밋, 작업 메모만 제외.
+.overnight/
