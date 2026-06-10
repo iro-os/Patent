@@ -40,3 +40,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# KIPO 예시/서식 원본 PDF (바이너리) — 공개 문서라 언제든 재취득 가능, git 비대화 방지로 제외.
+# 가치 있는 파생물(lib/exemplars/data/*.json, docs/exemplars/*.md)은 커밋한다.
+resource/exemplars/pdf/
+resource/특허 제출 자료 예시/
+resource/특허 제출 자료 서식/
