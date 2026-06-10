@@ -40,7 +40,10 @@ export async function POST(req: Request) {
       .from('prior_art_refs')
       .select('source, title, pub_date, url, ext_id')
       .eq('project_id', projectId)
+      // Same deterministic order as generation, so the DOCX 선행기술문헌 [문헌N] list
+      // lines up with the inline [N] markers carried in the exported body prose.
       .order('similarity', { ascending: false, nullsFirst: false })
+      .order('id', { ascending: true })
       .limit(15),
     supabase.from('claim_strategy').select('independent_scope, dependent_ladder').eq('project_id', projectId).maybeSingle(),
     supabase.from('differentiation_points').select('point').eq('project_id', projectId).order('created_at'),
