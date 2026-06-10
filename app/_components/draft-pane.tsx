@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { ChevronDown } from 'lucide-react'
+import { toast } from 'sonner'
 import { SPEC_OUTLINE } from '@/lib/kipo/sections'
 import { computeGrace } from '@/lib/kipo/disclosure'
 import { Button } from '@/components/ui/button'
@@ -61,6 +62,7 @@ export function DraftPane({
 }) {
   const router = useRouter()
   const [working, setWorking] = useState(false)
+  const [exporting, setExporting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [tab, setTab] = useState<'outline' | 'document'>('outline')
   const docRef = useRef<HTMLDivElement>(null)
@@ -137,6 +139,37 @@ export function DraftPane({
     }
   }
 
+  // P0-B — download the current draft (generated body or dossier) as a KIPO-ordered .docx.
+  const exportDocx = async () => {
+    setExporting(true)
+    try {
+      const res = await fetch('/api/export', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectId }),
+      })
+      if (!res.ok) {
+        toast.error('DOCX 내보내기에 실패했습니다.')
+        return
+      }
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${project.title || '명세서'}.docx`
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+      toast.success('DOCX를 내보냈습니다.', { description: '변리사 검토용 초안입니다.' })
+      router.refresh() // status → exported
+    } catch {
+      toast.error('내보내기 중 오류가 발생했습니다.')
+    } finally {
+      setExporting(false)
+    }
+  }
+
   return (
     <div className="flex h-full flex-col bg-neutral-100 dark:bg-neutral-900/40">
       <Tabs value={tab} onValueChange={(v) => setTab(v as 'outline' | 'document')} className="flex h-full flex-col">
@@ -192,9 +225,23 @@ export function DraftPane({
 
         {/* ── 제안서 원문 ────────────────────────────────────────────────── */}
         <TabsContent value="document" className="flex-1 overflow-y-auto p-5" ref={docRef}>
-          <div className="mb-3 flex items-center justify-end">
-            <Button onClick={buildDraft} disabled={working || !hasRefs} size="sm" title={hasRefs ? '' : '먼저 심층 리서치를 실행하세요'}>
+          <div className="mb-3 flex items-center justify-end gap-2">
+            <Button
+              onClick={buildDraft}
+              disabled={working || !hasRefs}
+              size="sm"
+              variant="outline"
+              title={hasRefs ? '' : '먼저 심층 리서치를 실행하세요'}
+            >
               {working ? '작성 중…' : analyzed ? '초안 갱신' : '초안 작성'}
+            </Button>
+            <Button
+              onClick={exportDocx}
+              disabled={exporting || !hasRefs}
+              size="sm"
+              title={hasRefs ? '' : '먼저 심층 리서치를 실행하세요'}
+            >
+              {exporting ? '내보내는 중…' : 'DOCX 내보내기'}
             </Button>
           </div>
 
