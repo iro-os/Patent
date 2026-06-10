@@ -66,9 +66,17 @@ function parsePubmedXml(xml: string): RetrievedRef[] {
     const year = first(block, /<PubDate>[\s\S]*?<Year>(\d{4})<\/Year>/) ||
       first(block, /<MedlineDate>(\d{4})/)
     const langRaw = first(block, /<Language>([a-z]{2,3})<\/Language>/)
+    // DOI(있으면) — OpenAlex 결과와 교차 dedup용. ArticleId 우선, 없으면 ELocationID.
+    const doi = (
+      first(block, /<ArticleId IdType="doi">([^<]+)<\/ArticleId>/i) ||
+      first(block, /<ELocationID EIdType="doi"[^>]*>([^<]+)<\/ELocationID>/i)
+    )
+      ?.trim()
+      .toLowerCase()
     refs.push({
       source: 'pubmed',
       ext_id: pmid,
+      doi,
       url: `https://pubmed.ncbi.nlm.nih.gov/${pmid}/`,
       pub_date: year ? `${year}-01-01` : undefined,
       lang: langRaw === 'eng' ? 'en' : langRaw || 'en',

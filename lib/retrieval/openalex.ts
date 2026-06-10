@@ -31,9 +31,11 @@ export async function searchOpenAlex(query: string, perPage = 15): Promise<Retri
 
   return results.map((w): RetrievedRef => {
     const extId = (w.id ?? '').replace('https://openalex.org/', '') || (w.id ?? '')
+    const doi = w.doi ? w.doi.replace(/^https?:\/\/(dx\.)?doi\.org\//i, '').toLowerCase() : undefined
     return {
       source: 'openalex',
       ext_id: extId,
+      doi,
       url: w.doi || w.primary_location?.landing_page_url || w.id,
       pub_date: w.publication_date, // already YYYY-MM-DD
       lang: w.language,

@@ -90,6 +90,7 @@ export interface DebriefResult {
 export interface RetrievedRef {
   source: PriorArtSource
   ext_id: string
+  doi?: string // normalized DOI (lowercased, URL 접두사 제거) — 교차소스 dedup 1순위 키
   url?: string
   pub_date?: string // normalized to YYYY-MM-DD (or undefined)
   lang?: string

@@ -14,6 +14,14 @@ export interface RetrievalResult {
 
 const MAX_REFS = 25 // cap the fast-pass report size
 
+// 기밀성: 미공개 발명의 핵심 조합이 외부 검색 API로 통째로 나가지 않도록, 외부 전송 질의의
+// 단어 수를 제한한다(docs/prior-art-sources-2026 §5 규칙 #3을 코드로 강제). 짧은 facet 개념엔
+// 영향이 거의 없고, 길어질 수 있는 광역 자연어 질의만 잘라낸다.
+function clampQuery(s: string, maxWords: number): string {
+  const words = s.trim().split(/\s+/).filter(Boolean)
+  return words.length <= maxWords ? words.join(' ') : words.slice(0, maxWords).join(' ')
+}
+
 // Fast pass (R6): facet search across the free DBs, dedupe, rank.
 // IMPORTANT: one giant query ANDs every term and returns 0 (PubMed auto-ANDs;
 // OpenAlex chokes on very long strings). So we split the debrief's concept
@@ -26,10 +34,13 @@ async function facetSweep(
   concepts: string[],
   broadQuery: string,
 ): Promise<{ pubmed: RetrievedRef[]; openalex: RetrievedRef[]; oaQueries: number }> {
-  const pubmedTerm = concepts.length
-    ? concepts.map((c) => `("${c.replace(/"/g, '')}")`).join(' OR ')
-    : broadQuery
-  const oaConcepts = (concepts.length ? concepts : [broadQuery]).slice(0, 3).filter(Boolean)
+  // 외부 전송 전 기밀성 클램프: 개념 facet은 8단어, 광역 질의는 12단어로 제한.
+  const safeConcepts = concepts.map((c) => clampQuery(c, 8)).filter(Boolean)
+  const safeBroad = clampQuery(broadQuery, 12)
+  const pubmedTerm = safeConcepts.length
+    ? safeConcepts.map((c) => `("${c.replace(/"/g, '')}")`).join(' OR ')
+    : safeBroad
+  const oaConcepts = (safeConcepts.length ? safeConcepts : [safeBroad]).slice(0, 3).filter(Boolean)
 
   const [pubmed, ...oaResults] = await Promise.all([
     searchPubmed(pubmedTerm, 20).catch(() => [] as RetrievedRef[]),
@@ -58,7 +69,9 @@ export async function searchPriorArt(opts: {
     broadened = true
   }
 
-  const rankTerms = en.length ? tokenize(en.join(' ')) : tokenize(opts.query)
+  // 랭킹 텀 = en + ko 개념어(한국어 ref는 KIPRIS 연동 후 매칭; 지금은 무해). 둘 다 없으면 질의.
+  const ko = (opts.concepts?.ko ?? []).map((c) => c.trim()).filter(Boolean)
+  const rankTerms = tokenize([...en, ...ko].join(' ') || opts.query)
   const ranked = rank(merged, rankTerms).slice(0, MAX_REFS)
 
   // Coverage honesty (invariant #4): never claim 100%. Real current gaps.
@@ -95,15 +108,15 @@ export async function searchPriorArt(opts: {
 // Ranking terms = individual significant words from the concept phrases.
 // (Multi-word phrases rarely appear verbatim in a title, so we score on words.)
 function tokenize(s: string): string[] {
-  const stop = new Set(['the', 'and', 'for', 'with', 'device', 'system', 'method', 'using'])
-  return Array.from(
-    new Set(
-      s
-        .toLowerCase()
-        .split(/[^a-z0-9가-힣]+/)
-        .filter((w) => w.length >= 4 && !stop.has(w)),
-    ),
-  )
+  const stop = new Set(['the', 'and', 'for', 'with', 'device', 'system', 'method', 'using', 'from', 'that', 'this'])
+  const out = new Set<string>()
+  // 한글은 2자 이상 허용(압력·센서·인솔 등 핵심어가 4자 필터에 잘리던 문제), 영문은 4자+불용어 제외. NFC 정규화.
+  for (const w of s.toLowerCase().normalize('NFC').split(/[^a-z0-9가-힣]+/)) {
+    if (!w) continue
+    const hasHangul = /[가-힣]/.test(w)
+    if (hasHangul ? w.length >= 2 : w.length >= 4 && !stop.has(w)) out.add(w)
+  }
+  return Array.from(out)
 }
 
 function normTitle(t?: string): string {
@@ -117,12 +130,11 @@ function dedupe(refs: RetrievedRef[]): RetrievedRef[] {
   const seen = new Set<string>()
   const out: RetrievedRef[] = []
   for (const r of refs) {
-    // Qualify the title key with year so distinct same-titled works ("Editorial",
-    // "Correction", a reply published in a different year) are not collapsed into one.
-    // Empty/punctuation-only titles fall back to the source-native id (always unique).
+    // DOI가 가장 강한 교차소스 동일성(PubMed↔OpenAlex 같은 논문 병합). 없으면 제목|연도로,
+    // 그것도 없으면 소스 고유 id로 폴백(동명 다른 연도 과병합 방지).
     const norm = normTitle(r.title)
     const year = r.pub_date ? r.pub_date.slice(0, 4) : ''
-    const key = norm ? `${norm}|${year}` : `${r.source}:${r.ext_id}`
+    const key = r.doi ? `doi:${r.doi}` : norm ? `${norm}|${year}` : `${r.source}:${r.ext_id}`
     if (seen.has(key)) continue
     seen.add(key)
     out.push(r)

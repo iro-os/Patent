@@ -107,7 +107,7 @@ const INPUT_SCHEMA: Anthropic.Tool['input_schema'] = {
     differentiators: { type: 'string' },
     ipc_candidates: { type: 'array', items: { type: 'string' } },
     missing_items: { type: 'array', items: { type: 'string' } },
-    search_query_en: { type: 'string', description: '선행기술 검색용 영어 자연어 질의 (boolean 연산자 없이).' },
+    search_query_en: { type: 'string', description: '선행기술 검색용 영어 자연어 질의 (boolean 없이, 12단어 이내 권장). 기밀: 미공개 신규 조합·고유명칭·정확한 수치는 넣지 말고 일반 기술용어 위주로.' },
     search_concepts: {
       type: 'object',
       properties: {
