@@ -23,6 +23,9 @@ export async function POST(req: Request) {
   if (!projectId || !sectionKey) {
     return NextResponse.json({ error: 'projectId와 sectionKey가 필요합니다.' }, { status: 400 })
   }
+  if (instruction && instruction.length > 4000) {
+    return NextResponse.json({ error: 'instruction_too_long', message: '수정 지시가 너무 깁니다 (최대 4000자).' }, { status: 400 })
+  }
   // '요약'은 KIPO_SECTIONS(별지15)엔 없지만 별지16호 요약서로 생성 가능한 키.
   if (!KIPO_SECTION_KEYS.includes(sectionKey) && sectionKey !== '요약') {
     return NextResponse.json({ error: 'unknown_section' }, { status: 400 })

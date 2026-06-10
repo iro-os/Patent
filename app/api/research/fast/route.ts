@@ -110,21 +110,25 @@ export async function POST(req: Request) {
     // we've already committed to rebuilding), so each call is isolated.
     const koMap = new Map<string, string>()
     const topForeign = refs.filter((r) => (r.lang ?? 'en') !== 'ko').slice(0, MAX_KO_SUMMARIES)
-    for (const r of topForeign) {
-      try {
-        const ko = await summarizeForeignRef(
-          {
-            inventionSummary: debrief.tech_summary ?? '',
-            refTitle: r.title ?? '',
-            refAbstract: r.abstract ?? '',
-          },
-          (u) => recordUsage(supabase, { projectId, operation: 'summarize' }, u),
-        )
-        if (ko) koMap.set(r.ext_id, `${ko.summary_ko}\n\n[관련성] ${ko.relevance_ko}`)
-      } catch (e) {
-        console.error('ko summary failed:', r.ext_id, e instanceof Error ? e.message : e)
-      }
-    }
+    // 병렬화: 최대 5건의 한국어 요약을 동시에 실행. 직렬이면 60s maxDuration을 넘겨 라우트가
+    // 중간에 죽고 status가 'researching'에 갇힐 수 있었음. 각 호출은 격리(한 건 실패 무해).
+    await Promise.all(
+      topForeign.map(async (r) => {
+        try {
+          const ko = await summarizeForeignRef(
+            {
+              inventionSummary: debrief.tech_summary ?? '',
+              refTitle: r.title ?? '',
+              refAbstract: r.abstract ?? '',
+            },
+            (u) => recordUsage(supabase, { projectId, operation: 'summarize' }, u),
+          )
+          if (ko) koMap.set(r.ext_id, `${ko.summary_ko}\n\n[관련성] ${ko.relevance_ko}`)
+        } catch (e) {
+          console.error('ko summary failed:', r.ext_id, e instanceof Error ? e.message : e)
+        }
+      }),
+    )
 
     // Assemble the new rows BEFORE the destructive delete, so a failure earlier in
     // the pipeline can never wipe the user's existing report.

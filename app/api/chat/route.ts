@@ -25,6 +25,13 @@ export async function POST(req: Request) {
   if (!projectId || !message?.trim()) {
     return NextResponse.json({ error: 'projectId와 메시지가 필요합니다.' }, { status: 400 })
   }
+  // 비용·DoS·프롬프트 오염 가드: 사용자 메시지는 유일하게 길이 무제한이던 LLM 입력이었음.
+  if ((message?.length ?? 0) > 8000) {
+    return NextResponse.json(
+      { error: 'message_too_long', message: '메시지가 너무 깁니다 (최대 8000자). 핵심만 입력해 주세요.' },
+      { status: 400 },
+    )
+  }
 
   const supabase = await createClient()
   const {

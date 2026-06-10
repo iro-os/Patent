@@ -19,7 +19,7 @@ This version has breaking changes — APIs, conventions, and file structure may 
 
 **Non-negotiable invariants:**
 1. **Grounding** — generation cites only from a closed allow-list of real retrieved-ref IDs; a post-generation validator strips/rejects anything else. Never fabricate citations.
-2. **Confidentiality** — unpublished invention data: zero-retention LLM AND embeddings; never send payloads to training-enabled/public endpoints; RLS keeps users isolated.
+2. **Confidentiality** — unpublished invention data: relies on the API's default no-train (Zero Data Retention is **deferred for the MVP** — enable ZDR at the org level before handling stricter data); never send payloads to training-enabled/public endpoints; RLS keeps users isolated.
 3. **Dossier = source of truth** — the document is a per-section projection; regenerate uses a true 3-way merge (`spec_sections.base_generated_text` ancestor) and flags conflicts; never silently overwrite manual edits; respect `locked`.
 4. **Coverage honesty** — always ship a coverage report; never claim 100% prior-art completeness.
 5. **KIPO §30** — compute/surface the grace-period deadline when a disclosure date exists.

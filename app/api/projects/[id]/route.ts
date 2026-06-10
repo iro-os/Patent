@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { must, PersistError } from '@/lib/db'
+import { PersistError } from '@/lib/db'
 
 export const runtime = 'nodejs'
 
@@ -22,15 +22,18 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
 
   const patch: Record<string, unknown> = {}
-  if (typeof body.title === 'string') patch.title = body.title.trim() || '제목 없는 발명'
+  if (typeof body.title === 'string') patch.title = body.title.trim().slice(0, 200) || '제목 없는 발명'
   if (typeof body.pinned === 'boolean') patch.pinned = body.pinned
-  if ('group_name' in body) patch.group_name = body.group_name?.trim() || null
+  if ('group_name' in body) patch.group_name = body.group_name?.trim().slice(0, 100) || null
   if (Object.keys(patch).length === 0) {
     return NextResponse.json({ error: 'no_fields' }, { status: 400 })
   }
 
   try {
-    must(await supabase.from('projects').update(patch).eq('id', id), 'project patch')
+    // .select()로 영향 행을 확인 — RLS가 막은 0-row(비소유/없는 id)는 false ok가 아니라 404로.
+    const { data, error } = await supabase.from('projects').update(patch).eq('id', id).select('id')
+    if (error) throw new PersistError('project patch', error.message)
+    if (!data?.length) return NextResponse.json({ error: 'not_found' }, { status: 404 })
   } catch (e) {
     if (e instanceof PersistError) return NextResponse.json({ error: 'persist_failed' }, { status: 500 })
     console.error('project patch failed:', e instanceof Error ? e.message : e)
@@ -48,7 +51,9 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
   if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
 
   try {
-    must(await supabase.from('projects').delete().eq('id', id), 'project delete')
+    const { data, error } = await supabase.from('projects').delete().eq('id', id).select('id')
+    if (error) throw new PersistError('project delete', error.message)
+    if (!data?.length) return NextResponse.json({ error: 'not_found' }, { status: 404 })
   } catch (e) {
     if (e instanceof PersistError) return NextResponse.json({ error: 'persist_failed' }, { status: 500 })
     console.error('project delete failed:', e instanceof Error ? e.message : e)
