@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { ChevronDown } from 'lucide-react'
 import { toast } from 'sonner'
-import { SPEC_OUTLINE, SPEC_BODY_KEYS } from '@/lib/kipo/sections'
+import { SPEC_OUTLINE, SPEC_BODY_KEYS, groupKipoCitations } from '@/lib/kipo/sections'
 import { buildDocumentModel, paraLabel, type DocContainer, type DocSection } from '@/lib/spec/document-model'
 import { computeGrace } from '@/lib/kipo/disclosure'
 import { Button } from '@/components/ui/button'
@@ -307,6 +307,7 @@ export function DraftPane({
                   claimStrategy: claimStrategy ?? null,
                   abstract: secByKey.get('요약')?.generated_text ?? null,
                   refsCount: refList.length,
+                  priorArt: groupKipoCitations(refList),
                 })}
                 refs={refList}
                 onRevert={revertSection}
@@ -440,6 +441,25 @@ function SectionView({
                 {p.text}
               </p>
             ))}
+          </div>
+        )}
+
+        {section.kind === 'priorArt' && (
+          <div className="mt-1 space-y-1">
+            {(section.priorArtItems ?? []).map((it, i) =>
+              it.type === 'subhead' ? (
+                <h4 key={i} className="pt-0.5 text-[12px] font-bold text-neutral-700">
+                  【{it.text}】
+                </h4>
+              ) : (
+                <p key={i} className="text-[12.5px]">
+                  {it.num != null && (
+                    <span className="mr-1 select-none align-top text-[11px] text-neutral-400">{paraLabel(it.num)}</span>
+                  )}
+                  {it.text}
+                </p>
+              ),
+            )}
           </div>
         )}
 

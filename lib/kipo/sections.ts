@@ -2,8 +2,6 @@
 // 출처: 특허청 공식 서식 견본. 전체 원문/예시는 docs/kipo-application-template.md 참조.
 // 이 파일이 "특허 형식 자동 매핑"(기능 1)과 문서 생성(Phase 2)의 타깃 구조다.
 
-import type { PriorArtSource } from '@/lib/types'
-
 export interface KipoSection {
   key: string // 공식 서식의 【 】 라벨 그대로
   en: string
@@ -34,7 +32,7 @@ export const KIPO_SECTIONS: KipoSection[] = [
     en: 'Prior-art documents',
     optional: true,
     guidance:
-      '특허문헌/비특허문헌으로 구분. 선행기술 리서치 결과가 여기에 매핑됨. 형식은 formatKipoCitation() 참조.',
+      '특허문헌/비특허문헌으로 구분. 선행기술 리서치 결과가 여기에 매핑됨. 형식은 groupKipoCitations() 참조.',
   },
   {
     key: '해결하려는 과제',
@@ -182,34 +180,44 @@ export const KIPO_APPLICATION_FIELDS = [
   { key: '수수료', autofill: false },
 ] as const
 
-// ── 선행기술문헌 인용 형식 (공식 서식 견본 기준) ─────────────────────────────
-// 특허문헌: [문헌1] US 5635683 A (MCDERMOTT, R. M.) 1997.06.03.
-// 비특허문헌: [문헌1] 저자. 제목. 출판사, 연도, 쪽수.
-// index는 호출 측에서 1-base로 부여. 반환값에 [문헌N] 접두사 포함.
-export function formatKipoCitation(
-  ref: {
-    source: PriorArtSource
-    title?: string | null
-    pub_date?: string | null
-    url?: string | null
-    ext_id?: string | null
-  },
-  index: number,
-): { kind: '특허문헌' | '비특허문헌'; text: string } {
-  // pub_date holds YYYY-MM-DD; the official samples print YYYY.MM.DD with a trailing period.
+// ── 선행기술문헌 인용 형식 (모범명세서: 【특허문헌】/【비특허문헌】 + (특허문헌 0001) …) ──
+// 모범명세서(별지15)는 특허문헌/비특허문헌을 하위표제로 나누고, 항목을 (특허문헌 0001) 형식으로,
+// 묶음 전체에 식별번호 1개를 부여한다. 여기서는 "본문(body)"만 만들고, (특허문헌 NNNN) 접두사와
+// 식별번호는 단일 문서 모델(buildDocumentModel)이 부여한다. ※ 현재 검색은 학술(PubMed/OpenAlex)
+// = 비특허문헌이며, 특허 DB(KIPRIS/EPO) 연동 시 특허문헌으로 분류된다.
+export interface CitationRef {
+  source: string
+  title?: string | null
+  pub_date?: string | null
+  url?: string | null
+  ext_id?: string | null
+}
+
+function citationBody(ref: CitationRef): { kind: '특허문헌' | '비특허문헌'; body: string } {
+  // pub_date holds YYYY-MM-DD; 공식 견본은 YYYY.MM.DD 표기.
   const dateStr = ref.pub_date ? ref.pub_date.slice(0, 10).replace(/-/g, '.') : ''
   const isPatent = ref.source === 'google_patents' || ref.source === 'kipris' || ref.source === 'epo'
-
   if (isPatent) {
-    // 특허문헌: [문헌N] {번호} {종류(A 등)} ({출원인}) {YYYY.MM.DD}.
-    // 종류·출원인은 특허 DB(Google Patents/KIPRIS/EPO) 연동 후 보강 (현재는 가용 정보로 구성).
+    // 특허문헌: {등록/공개번호} {명칭} {YYYY.MM.DD}. (종류·출원인은 특허 DB 연동 후 보강)
     const body = [ref.ext_id, ref.title, dateStr].filter(Boolean).join(' ')
-    return { kind: '특허문헌', text: `[문헌${index}] ${body}${body ? '.' : ''}` }
+    return { kind: '특허문헌', body: body ? `${body}.` : '(서지정보 없음)' }
   }
-
-  // 비특허문헌 (PubMed/OpenAlex = 논문): [문헌N] 제목. 연월일. URL.
+  // 비특허문헌(논문): {제목}. {연월일}. {URL}.
   const body = [ref.title, dateStr || null, ref.url].filter(Boolean).join('. ')
-  return { kind: '비특허문헌', text: `[문헌${index}] ${body}${body ? '.' : ''}` }
+  return { kind: '비특허문헌', body: body ? `${body}.` : '(서지정보 없음)' }
+}
+
+// refs를 특허문헌/비특허문헌 본문 배열로 분류(순서 보존). buildDocumentModel이 이를 받아
+// 【특허문헌】/【비특허문헌】 하위표제 + (특허문헌 0001) 넘버링 + 식별번호 1개로 렌더한다.
+export function groupKipoCitations(refs: CitationRef[]): { patent: string[]; nonPatent: string[] } {
+  const patent: string[] = []
+  const nonPatent: string[] = []
+  for (const ref of refs) {
+    const { kind, body } = citationBody(ref)
+    if (kind === '특허문헌') patent.push(body)
+    else nonPatent.push(body)
+  }
+  return { patent, nonPatent }
 }
 
 // ── MVP 준수 체크리스트 (프로그램적 게이트; 주관적 "변리사에 넘길 만하다" 대체) ──

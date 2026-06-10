@@ -9,17 +9,25 @@ export interface DocParagraph {
   text: string
 }
 
+// 선행기술문헌 블록의 한 줄: 하위표제(【특허문헌】) 또는 인용항목((특허문헌 0001) …).
+export interface PriorArtItem {
+  type: 'subhead' | 'cite'
+  text: string // subhead: '특허문헌'/'비특허문헌'; cite: '(특허문헌 0001) {본문}'
+  num?: number | null // cite 첫 항목에만 식별번호(블록당 1개)
+}
+
 export interface DocSection {
   sectionKey: string // data-sec / 되돌리기 조회용 (예: '기술분야', '요약')
   label: string // 표제 텍스트 (예: '기술분야')
   depth: 1 | 2 // 1 = 발명의 설명 직속, 2 = 발명의 내용 하위
   subContainerStart?: string // 이 섹션 앞에 하위 컨테이너 표제를 emit (예: '발명의 내용')
-  kind: 'prose' | 'claimStrategy' | 'note'
+  kind: 'prose' | 'claimStrategy' | 'note' | 'priorArt'
   paragraphs: DocParagraph[] // kind=prose
   refNs: number[] // 근거 칩(앱 전용; DOCX는 무시)
   canRevert: boolean // 되돌리기 스트립(앱 전용)
   claim?: { independentScope: string | null; ladder: string[] } // kind=claimStrategy
   note?: string // kind=note
+  priorArtItems?: PriorArtItem[] // kind=priorArt (선행기술문헌)
 }
 
 export interface DocContainer {
@@ -34,7 +42,7 @@ export interface BuildInput {
   abstract?: string | null // 요약서 본문(spec_sections['요약'])
   repFigure?: string | null // 대표도 (예: '도 1')
   refsCount?: number // in-range [N] 칩 필터용
-  priorArtLines?: string[] // 선행기술문헌 인용 리스트(미생성 시 사용; formatKipoCitation로 사전 포맷)
+  priorArt?: { patent: string[]; nonPatent: string[] } // 선행기술문헌(refs를 groupKipoCitations로 분류)
 }
 
 // 발명의 설명 내부 흐름(별지15호). sub='발명의 내용'인 항목은 그 하위 컨테이너로 묶인다.
@@ -76,6 +84,33 @@ export function paraLabel(n: number): string {
   return `【${String(n).padStart(4, '0')}】`
 }
 
+// 선행기술문헌 refs → 렌더 항목들. 모범명세서 형식: 【특허문헌】/【비특허문헌】 하위표제 +
+// (특허문헌 0001) 인용 + 블록 전체에 식별번호 1개(첫 인용항목). refs 없으면 빈 배열.
+function buildPriorArtItems(
+  pa: { patent: string[]; nonPatent: string[] } | undefined,
+  nextNum: () => number,
+): PriorArtItem[] {
+  if (!pa || (!pa.patent.length && !pa.nonPatent.length)) return []
+  const items: PriorArtItem[] = []
+  let assigned = false
+  const blockNum = nextNum() // 선행기술문헌 블록은 식별번호 1개 소비
+  const addGroup = (kind: '특허문헌' | '비특허문헌', bodies: string[]) => {
+    if (!bodies.length) return
+    items.push({ type: 'subhead', text: kind })
+    bodies.forEach((body, i) => {
+      const item: PriorArtItem = { type: 'cite', text: `(${kind} ${String(i + 1).padStart(4, '0')}) ${body}` }
+      if (!assigned) {
+        item.num = blockNum
+        assigned = true
+      }
+      items.push(item)
+    })
+  }
+  addGroup('특허문헌', pa.patent)
+  addGroup('비특허문헌', pa.nonPatent)
+  return items
+}
+
 export function buildDocumentModel(input: BuildInput): DocContainer[] {
   const refsCount = input.refsCount ?? 0
   const containers: DocContainer[] = []
@@ -85,13 +120,27 @@ export function buildDocumentModel(input: BuildInput): DocContainer[] {
   const specSections: DocSection[] = []
   let prevPushedSub: string | undefined
   for (const { key, sub, required, noNumber } of SPEC_FLOW) {
+    // 선행기술문헌: 본문 생성 대상이 아니라 검색 refs로 구성한다. 【특허문헌】/【비특허문헌】
+    // 하위표제 + (특허문헌 0001) 표기 + 묶음당 식별번호 1개(모범명세서 형식). refs 없으면 생략.
+    if (key === '선행기술문헌') {
+      const items = buildPriorArtItems(input.priorArt, () => ++counter)
+      if (items.length) {
+        specSections.push({
+          sectionKey: key,
+          label: key,
+          depth: 1,
+          kind: 'priorArt',
+          paragraphs: [],
+          refNs: [],
+          canRevert: false,
+          priorArtItems: items,
+        })
+      }
+      continue
+    }
+
     const text = input.sections[key]?.text?.trim()
-    // 선행기술문헌은 본문 생성 대상이 아니므로(미생성), 선행기술 목록이 있으면 인용 리스트로 채운다.
-    const lines = text
-      ? splitParas(text)
-      : key === '선행기술문헌' && input.priorArtLines?.length
-        ? input.priorArtLines
-        : null
+    const lines = text ? splitParas(text) : null
 
     let sec: DocSection
     if (lines?.length) {

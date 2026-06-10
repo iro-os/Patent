@@ -1,5 +1,5 @@
 import { Document, Packer, Paragraph, TextRun, AlignmentType, LineRuleType } from 'docx'
-import { formatKipoCitation } from '@/lib/kipo/sections'
+import { groupKipoCitations } from '@/lib/kipo/sections'
 import { buildDocumentModel, paraLabel, type DocSection } from '@/lib/spec/document-model'
 import type { PriorArtSource } from '@/lib/types'
 
@@ -67,6 +67,12 @@ function renderSection(sec: DocSection): Paragraph[] {
   if (sec.kind !== 'claimStrategy') out.push(hx(sec.label, sec.depth === 2 ? 23 : 24))
   if (sec.kind === 'prose') {
     for (const p of sec.paragraphs) out.push(para((p.num ? `${paraLabel(p.num)} ` : '') + p.text))
+  } else if (sec.kind === 'priorArt') {
+    // 【특허문헌】/【비특허문헌】 하위표제 + (특허문헌 0001) 인용행(첫 행에만 식별번호).
+    for (const it of sec.priorArtItems ?? []) {
+      if (it.type === 'subhead') out.push(hx(it.text, 22))
+      else out.push(para((it.num ? `${paraLabel(it.num)} ` : '') + it.text))
+    }
   } else if (sec.kind === 'claimStrategy' && sec.claim) {
     out.push(para(`(청구 전략 — 실제 청구항 텍스트는 후속 단계) 독립항 범위: ${sec.claim.independentScope ?? ''}`))
     sec.claim.ladder.forEach((c, i) => out.push(para(`종속 ${i + 1}. ${c}`)))
@@ -118,7 +124,7 @@ export async function buildSpecDocx(input: ExportInput): Promise<Buffer> {
     abstract: input.abstract,
     repFigure: input.repFigure,
     refsCount: input.refs?.length ?? 0,
-    priorArtLines: (input.refs ?? []).map((r, i) => formatKipoCitation(r, i + 1).text),
+    priorArt: groupKipoCitations(input.refs ?? []),
   })
 
   if (containers.length === 0) {
