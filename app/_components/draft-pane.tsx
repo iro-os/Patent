@@ -316,10 +316,10 @@ export function DraftPane({
                     />
                   )
                 })}
-                {/* 특허청구범위 — 실제 청구항 텍스트는 P1; 현재는 청구 전략을 노출 */}
+                {/* 청구범위 — 실제 청구항 텍스트는 P1; 현재는 청구 전략을 노출 */}
                 {claimStrategy?.independent_scope && (
-                  <section data-sec="특허청구범위">
-                    <h2 className="font-semibold">【특허청구범위】 (전략)</h2>
+                  <section data-sec="청구범위">
+                    <h2 className="font-semibold">【청구범위】 (전략)</h2>
                     <p className="mt-1">
                       <span className="font-medium">독립항 범위.</span> {claimStrategy.independent_scope}
                     </p>
@@ -342,7 +342,7 @@ export function DraftPane({
                 </p>
                 {claimStrategy?.independent_scope && (
                   <section>
-                    <h2 className="font-semibold">【특허청구범위 전략】</h2>
+                    <h2 className="font-semibold">【청구범위 전략】</h2>
                     <p className="mt-1">
                       <span className="font-medium">독립항 범위.</span> {claimStrategy.independent_scope}
                     </p>

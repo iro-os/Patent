@@ -99,7 +99,7 @@ export async function buildSpecDocx(input: ExportInput): Promise<Buffer> {
     // Dossier fallbacks for keys not yet generated as prose (P0-A fills these later).
     let fallback: Paragraph[] | null = null
     if (!gen) {
-      if (key === '특허청구범위' && input.claimStrategy?.independent_scope) {
+      if (key === '청구범위' && input.claimStrategy?.independent_scope) {
         const cs = input.claimStrategy
         const ps = body(`(청구 전략 — 실제 청구항 텍스트는 후속 단계) 독립항 범위: ${cs.independent_scope}`)
         ;(cs.dependent_ladder ?? []).forEach((c, i) => ps.push(...body(`종속 ${i + 1}. ${c}`)))

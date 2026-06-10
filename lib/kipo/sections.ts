@@ -86,7 +86,7 @@ export const KIPO_SECTIONS: KipoSection[] = [
     guidance: '뉴클레오타이드/아미노산 서열목록이 있는 경우.',
   },
   {
-    key: '특허청구범위',
+    key: '청구범위',
     en: 'Claims',
     guidance: '청구항 1은 독립항. 종속항은 선행 청구항을 인용(예: 제1항에 있어서).',
   },
@@ -99,7 +99,7 @@ export const KIPO_SECTION_KEYS = KIPO_SECTIONS.map((s) => s.key)
 // 문서 export 순서는 위 KIPO_SECTIONS(공식 별지15호)를 따르되, 화면 목차는 발명자에게
 // 친화적인 그룹으로 보여준다. (UI 그룹핑 ≠ 출력 문서 순서)
 //  - 도면의 간단한 설명·부호의 설명·발명을 실시하기 위한 구체적인 내용을 '발명의 내용'에 묶음
-//  - 특허청구범위를 독립 그룹으로 (법적 핵심이라 항상 노출)
+//  - 청구범위를 독립 그룹으로 (법적 핵심이라 항상 노출)
 //  - 요약서 / 대표도면 / 도면을 분리
 //  - 선택 항목은 접이식 '추가 항목 (선택)' 그룹으로 보관
 export interface OutlineGroup {
@@ -122,7 +122,7 @@ export const SPEC_OUTLINE: OutlineGroup[] = [
       { key: '발명을 실시하기 위한 구체적인 내용' },
     ],
   },
-  { group: '특허청구범위', items: [{ key: '특허청구범위' }] },
+  { group: '청구범위', items: [{ key: '청구범위' }] },
   { group: '요약서', items: [{ key: '요약' }] },
   { group: '대표도면', items: [{ key: '대표도면' }] },
   { group: '도면', items: [{ key: '도면' }] },
@@ -140,7 +140,7 @@ export const SPEC_OUTLINE: OutlineGroup[] = [
 ]
 
 // Sections we generate body prose for in P0-A (narrative spec sections, in document
-// order). Claims(특허청구범위) are intentionally excluded — actual claim-text generation
+// order). Claims(청구범위) are intentionally excluded — actual claim-text generation
 // is a P1 non-goal; the document uses the claim_strategy dossier for that section.
 export const SPEC_BODY_KEYS: string[] = [
   '발명의 명칭',
