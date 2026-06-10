@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { ChevronDown } from 'lucide-react'
 import { toast } from 'sonner'
 import { SPEC_OUTLINE, SPEC_BODY_KEYS } from '@/lib/kipo/sections'
+import { buildDocumentModel, paraLabel, type DocContainer, type DocSection } from '@/lib/spec/document-model'
 import { computeGrace } from '@/lib/kipo/disclosure'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -55,16 +56,8 @@ type SecStatus = 'empty' | 'draft' | 'done'
 
 const JSON_HEADERS = { 'Content-Type': 'application/json' }
 
-// In-range [N] markers in a generated section → the unique cited numbers (for 근거 chips).
-function citedNumbers(text: string | null, max: number): number[] {
-  if (!text) return []
-  const set = new Set<number>()
-  for (const m of text.matchAll(/\[(\d{1,3})\]/g)) {
-    const n = parseInt(m[1], 10)
-    if (n >= 1 && n <= max) set.add(n)
-  }
-  return [...set].sort((a, b) => a - b)
-}
+// 본문 생성 대상: 발명의 설명 핵심 섹션(SPEC_BODY_KEYS) + 요약(별지16). 순서대로 생성한다.
+const GENERATE_KEYS = [...SPEC_BODY_KEYS, '요약']
 
 // Right pane (Claude-Code's plan slot): the 출원서 draft.
 //  · 목차 탭 — KIPO 구조를 그룹/접기로, 섹션별 작성 상태(3색 점)와 함께
@@ -154,9 +147,9 @@ export function DraftPane({
       }
       let allOk = true
       let done = 0
-      for (let i = 0; i < SPEC_BODY_KEYS.length; i++) {
-        const key = SPEC_BODY_KEYS[i]
-        setGenProgress(`【${key}】 생성 중… (${i + 1}/${SPEC_BODY_KEYS.length})`)
+      for (let i = 0; i < GENERATE_KEYS.length; i++) {
+        const key = GENERATE_KEYS[i]
+        setGenProgress(`【${key}】 생성 중… (${i + 1}/${GENERATE_KEYS.length})`)
         const r = await fetch('/api/generate', { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ projectId, sectionKey: key }) })
         if (!r.ok) {
           const j = await r.json().catch(() => ({}))
@@ -169,7 +162,7 @@ export function DraftPane({
       // Only claim success if every section landed; otherwise report partial progress.
       if (allOk) toast.success('본문 생성을 완료했습니다.')
       else if (done > 0)
-        toast.warning(`${done}/${SPEC_BODY_KEYS.length} 섹션까지 생성됨`, { description: '다시 “본문 생성”을 눌러 이어서 시도하세요.' })
+        toast.warning(`${done}/${GENERATE_KEYS.length} 섹션까지 생성됨`, { description: '다시 “본문 생성”을 눌러 이어서 시도하세요.' })
       setTab('document')
       router.refresh() // show whatever did land
     } catch {
@@ -301,39 +294,23 @@ export function DraftPane({
             )}
 
             {hasBody ? (
-              <div className="mt-5 space-y-6 text-[13px] leading-relaxed">
-                {SPEC_BODY_KEYS.map((key) => {
-                  const s = secByKey.get(key)
-                  if (!s?.generated_text) return null
-                  return (
-                    <SectionBody
-                      key={key}
-                      schemaKey={key}
-                      text={s.generated_text}
-                      canRevert={s.base_generated_text != null}
-                      refs={refList}
-                      onRevert={() => revertSection(key)}
-                    />
-                  )
+              <DocumentBody
+                containers={buildDocumentModel({
+                  sections: Object.fromEntries(
+                    (sections ?? [])
+                      .filter((s) => s.generated_text)
+                      .map((s) => [
+                        s.schema_key,
+                        { text: s.generated_text as string, canRevert: s.base_generated_text != null },
+                      ]),
+                  ),
+                  claimStrategy: claimStrategy ?? null,
+                  abstract: secByKey.get('요약')?.generated_text ?? null,
+                  refsCount: refList.length,
                 })}
-                {/* 청구범위 — 실제 청구항 텍스트는 P1; 현재는 청구 전략을 노출 */}
-                {claimStrategy?.independent_scope && (
-                  <section data-sec="청구범위">
-                    <h2 className="font-semibold">【청구범위】 (전략)</h2>
-                    <p className="mt-1">
-                      <span className="font-medium">독립항 범위.</span> {claimStrategy.independent_scope}
-                    </p>
-                    {claimStrategy.dependent_ladder?.length ? (
-                      <ol className="mt-1.5 list-decimal space-y-0.5 pl-5">
-                        {claimStrategy.dependent_ladder.map((c, i) => (
-                          <li key={i}>{c}</li>
-                        ))}
-                      </ol>
-                    ) : null}
-                    <p className="mt-1 text-[11px] text-neutral-400">실제 청구항 텍스트 생성은 후속 단계입니다.</p>
-                  </section>
-                )}
-              </div>
+                refs={refList}
+                onRevert={revertSection}
+              />
             ) : analyzed ? (
               // Pre-body state: show the analysis dossier (strategy/effects/suggestions).
               <div className="mt-5 space-y-5 text-[13px] leading-relaxed">
@@ -395,65 +372,123 @@ export function DraftPane({
   )
 }
 
-// One generated 명세서 section: prose + (if regenerated) a revert strip + grounding chips.
-function SectionBody({
-  schemaKey,
-  text,
-  canRevert,
+// 단일 문서 모델(buildDocumentModel) → 앱 본문. DOCX 내보내기와 **동일한** 계층(발명의 설명 ▸
+// 발명의 내용)·연속 문단번호 【000N】·요약서를 그린다. 두 출력이 같은 모델을 walk하므로 형식이 일치.
+function DocumentBody({
+  containers,
   refs,
   onRevert,
 }: {
-  schemaKey: string
-  text: string
-  canRevert: boolean
+  containers: DocContainer[]
   refs: RefRow[]
-  onRevert: () => void
+  onRevert: (key: string) => void
 }) {
-  const cited = citedNumbers(text, refs.length)
   return (
-    <section data-sec={schemaKey}>
-      <div className="flex items-center justify-between gap-2">
-        <h2 className="font-semibold">【{schemaKey}】</h2>
-        {canRevert && (
-          <span className="flex items-center gap-1.5 text-[11px] text-amber-600">
-            ✦ AI가 수정함
-            <button onClick={onRevert} className="rounded border border-amber-300 px-1.5 py-0.5 font-medium hover:bg-amber-50">
-              되돌리기
-            </button>
-          </span>
-        )}
-      </div>
-      <div className="mt-1 space-y-1.5">
-        {text
-          .split(/\n+/)
-          .map((p) => p.trim())
-          .filter(Boolean)
-          .map((p, i) => (
-            <p key={i}>{p}</p>
+    <div className="mt-5 space-y-6 text-[13px] leading-relaxed">
+      {containers.map((c) => (
+        <div key={c.label} className="space-y-4">
+          <h2 className="border-b border-neutral-300 pb-1 text-center text-[15px] font-bold">【{c.label}】</h2>
+          {c.sections.map((s) => (
+            <SectionView key={s.sectionKey} section={s} refs={refs} onRevert={onRevert} />
           ))}
-      </div>
-      {cited.length > 0 && (
-        <div className="mt-2 flex flex-wrap items-center gap-1.5">
-          <span className="text-[10px] text-neutral-400">근거 선행기술</span>
-          {cited.map((n) => {
-            const r = refs[n - 1]
-            if (!r) return null
-            const chip = (
-              <span className="rounded bg-neutral-100 px-1.5 py-0.5 text-[10px] font-medium text-neutral-600">[{n}]</span>
-            )
-            return r.url ? (
-              <a key={n} href={r.url} target="_blank" rel="noopener noreferrer" title={r.title ?? ''} className="hover:underline">
-                {chip}
-              </a>
-            ) : (
-              <span key={n} title={r.title ?? ''}>
-                {chip}
-              </span>
-            )
-          })}
         </div>
+      ))}
+    </div>
+  )
+}
+
+// 한 섹션: (발명의 내용 같은) 하위 컨테이너 표제 + 섹션 표제(+되돌리기) + 본문/전략/노트 + 근거 칩.
+function SectionView({
+  section,
+  refs,
+  onRevert,
+}: {
+  section: DocSection
+  refs: RefRow[]
+  onRevert: (key: string) => void
+}) {
+  return (
+    <>
+      {section.subContainerStart && (
+        <h3 className="pt-1 text-[13px] font-bold text-neutral-700">【{section.subContainerStart}】</h3>
       )}
-    </section>
+      <section data-sec={section.sectionKey} className={section.depth === 2 ? 'pl-3' : ''}>
+        {section.kind !== 'claimStrategy' && (
+          <div className="flex items-center justify-between gap-2">
+            <h3 className="font-semibold">【{section.label}】</h3>
+            {section.canRevert && (
+              <span className="flex items-center gap-1.5 text-[11px] text-amber-600">
+                ✦ AI가 수정함
+                <button
+                  onClick={() => onRevert(section.sectionKey)}
+                  className="rounded border border-amber-300 px-1.5 py-0.5 font-medium hover:bg-amber-50"
+                >
+                  되돌리기
+                </button>
+              </span>
+            )}
+          </div>
+        )}
+
+        {section.kind === 'prose' && (
+          <div className="mt-1 space-y-1.5">
+            {section.paragraphs.map((p, i) => (
+              <p key={i}>
+                {p.num != null && (
+                  <span className="mr-1 select-none align-top text-[11px] text-neutral-400">{paraLabel(p.num)}</span>
+                )}
+                {p.text}
+              </p>
+            ))}
+          </div>
+        )}
+
+        {section.kind === 'claimStrategy' && section.claim && (
+          <div className="mt-1">
+            <p>
+              <span className="font-medium">독립항 범위.</span> {section.claim.independentScope}
+            </p>
+            {section.claim.ladder.length > 0 && (
+              <ol className="mt-1.5 list-decimal space-y-0.5 pl-5">
+                {section.claim.ladder.map((c, i) => (
+                  <li key={i}>{c}</li>
+                ))}
+              </ol>
+            )}
+            <p className="mt-1 text-[11px] text-neutral-400">실제 청구항 텍스트 생성은 후속 단계입니다.</p>
+          </div>
+        )}
+
+        {section.kind === 'note' && <p className="mt-1 text-neutral-500">{section.note}</p>}
+
+        {section.refNs.length > 0 && <Chips refNs={section.refNs} refs={refs} />}
+      </section>
+    </>
+  )
+}
+
+// 근거 선행기술 칩 — 모델의 refNs(in-range)를 refs[n-1]로 매핑.
+function Chips({ refNs, refs }: { refNs: number[]; refs: RefRow[] }) {
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-1.5">
+      <span className="text-[10px] text-neutral-400">근거 선행기술</span>
+      {refNs.map((n) => {
+        const r = refs[n - 1]
+        if (!r) return null
+        const chip = (
+          <span className="rounded bg-neutral-100 px-1.5 py-0.5 text-[10px] font-medium text-neutral-600">[{n}]</span>
+        )
+        return r.url ? (
+          <a key={n} href={r.url} target="_blank" rel="noopener noreferrer" title={r.title ?? ''} className="hover:underline">
+            {chip}
+          </a>
+        ) : (
+          <span key={n} title={r.title ?? ''}>
+            {chip}
+          </span>
+        )
+      })}
+    </div>
   )
 }
 

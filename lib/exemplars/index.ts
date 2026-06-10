@@ -68,7 +68,8 @@ export function selectExemplar(inventionText: string): Exemplar | null {
 // 선택된 예시에서 해당 섹션의 "문체 참고용" 텍스트(길면 절단). 없으면 null.
 export function exemplarSectionText(ex: Exemplar, sectionKey: string): string | null {
   if (SKIP_SECTIONS.has(sectionKey)) return null
-  const t = ex.spec[sectionKey]
+  // 요약은 예시의 spec에 없고 별도 abstract 필드에 있으므로 그걸 문체 참고로 쓴다.
+  const t = sectionKey === '요약' ? ex.abstract : ex.spec[sectionKey]
   if (!t) return null
   return t.length > MAX_EXEMPLAR_CHARS ? t.slice(0, MAX_EXEMPLAR_CHARS) + '\n…(이하 생략)' : t
 }

@@ -34,7 +34,7 @@ export async function POST(req: Request) {
     .single()
   if (!project) return NextResponse.json({ error: 'not_found' }, { status: 404 })
 
-  const [sectionsRes, refsRes, claimRes, diffRes, discRes] = await Promise.all([
+  const [sectionsRes, refsRes, claimRes, discRes] = await Promise.all([
     supabase.from('spec_sections').select('schema_key, generated_text').eq('project_id', projectId),
     supabase
       .from('prior_art_refs')
@@ -46,7 +46,6 @@ export async function POST(req: Request) {
       .order('id', { ascending: true })
       .limit(15),
     supabase.from('claim_strategy').select('independent_scope, dependent_ladder').eq('project_id', projectId).maybeSingle(),
-    supabase.from('differentiation_points').select('point').eq('project_id', projectId).order('created_at'),
     supabase.from('disclosure_check').select('disclosed, disclosure_date').eq('project_id', projectId).maybeSingle(),
   ])
 
@@ -70,7 +69,8 @@ export async function POST(req: Request) {
       sections,
       refs,
       claimStrategy: claimRes.data,
-      differentiation: diffRes.data ?? [],
+      abstract: sections['요약'] ?? null,
+      repFigure: null,
       grace,
     })
   } catch (e) {

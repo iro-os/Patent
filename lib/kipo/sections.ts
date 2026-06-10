@@ -165,6 +165,10 @@ export const KIPO_ABSTRACT = {
   guidance: '발명의 요지를 간결히. 대표도(예: 도 1) 지정.',
 }
 
+// 요약 생성 지침 (generateSection에 주입). KIPO_SECTIONS엔 없는 별지16호 요약서용.
+export const ABSTRACT_GUIDANCE =
+  '발명의 요지를 한 문단(4~6문장)으로 압축. 청구항 1의 핵심 구성 + 주요 효과를 담되, 새로운 사실·수치를 추가하지 말 것. 도면부호·번호 인용 없이 서술.'
+
 // ── 출원서 (별지 제14호 서식) — 서지/행정 정보 (대부분 출원인·변리사가 기입) ──
 // 우리 도구가 자동 채울 수 있는 필드만 추림. 특히 공지예외적용 = §30 (disclosure_check).
 export const KIPO_APPLICATION_FIELDS = [

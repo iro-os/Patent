@@ -3,7 +3,7 @@ import { generateSection, type SectionRefItem } from '@/lib/llm/generate'
 import { sanitizeRefMarkers } from '@/lib/llm/grounding'
 import { recordUsage } from '@/lib/llm/usage'
 import { must } from '@/lib/db'
-import { SECTION_GUIDANCE } from '@/lib/kipo/sections'
+import { SECTION_GUIDANCE, ABSTRACT_GUIDANCE } from '@/lib/kipo/sections'
 import { pickExemplarSection } from '@/lib/exemplars'
 
 const MAX_REFS = 15
@@ -78,7 +78,7 @@ export async function regenerateSection(
   const result = await generateSection(
     {
       sectionKey,
-      guidance: SECTION_GUIDANCE[sectionKey],
+      guidance: sectionKey === '요약' ? ABSTRACT_GUIDANCE : SECTION_GUIDANCE[sectionKey],
       debrief: {
         title: debrief.title_guess ?? '',
         tech_summary: debrief.tech_summary ?? '',
