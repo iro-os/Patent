@@ -366,7 +366,7 @@ function EmptyState({
       <h2 className="text-lg font-semibold">새 발명</h2>
       <p className="mx-auto mt-1 max-w-md text-sm text-neutral-500">
         아이디어를 자유롭게 설명하면 AI가 정리하고 빠진 점을 물어봅니다. 대화를 이어가며 발명을
-        구체화한 뒤, 심층 리서치와 출원서 초안으로 넘어가세요.
+        구체화한 뒤, 심층 리서치와 출원 서류 초안으로 넘어가세요.
       </p>
       <label
         onDragOver={(e) => {

@@ -59,7 +59,7 @@ const JSON_HEADERS = { 'Content-Type': 'application/json' }
 // 본문 생성 대상: 발명의 설명 핵심 섹션(SPEC_BODY_KEYS) + 요약(별지16). 순서대로 생성한다.
 const GENERATE_KEYS = [...SPEC_BODY_KEYS, '요약']
 
-// Right pane (Claude-Code's plan slot): the 출원서 draft.
+// Right pane (Claude-Code's plan slot): the 출원 서류 draft (명세서 + 요약서; 별지14 출원서 자체는 미생성).
 //  · 목차 탭 — KIPO 구조를 그룹/접기로, 섹션별 작성 상태(3색 점)와 함께
 //  · 제안서 원문 탭 — 생성된 명세서 본문(근거 칩 + 되돌리기) 또는 분석 dossier(생성 전)
 // 본문은 "본문 생성"(섹션 순회, grounding 통과)으로 채우고, DOCX로 내보낸다.
@@ -109,7 +109,7 @@ export function DraftPane({
         <p className="text-sm leading-relaxed text-neutral-400">
           왼쪽에서 발명을 선택하면
           <br />
-          출원서 초안이 여기에 표시됩니다.
+          출원 서류 초안이 여기에 표시됩니다.
         </p>
       </div>
     )
@@ -275,16 +275,22 @@ export function DraftPane({
 
           {!hasRefs && (
             <p className="mb-3 rounded-lg bg-amber-50 px-3 py-2 text-[11px] text-amber-700 dark:bg-amber-950/30 dark:text-amber-300">
-              출원서 초안은 대화 + 선행기술을 토대로 작성됩니다. 먼저 가운데 채팅에서 “심층 리서치”를
+              출원 서류 초안은 대화 + 선행기술을 토대로 작성됩니다. 먼저 가운데 채팅에서 “심층 리서치”를
               실행하세요.
             </p>
           )}
 
           <article className="mx-auto min-h-[72vh] max-w-[640px] rounded-sm bg-white px-8 py-12 text-neutral-900 shadow-lg ring-1 ring-black/5 dark:bg-neutral-100">
             <header className="border-b border-neutral-300 pb-3 text-center">
-              <p className="text-[11px] tracking-widest text-neutral-400">특허출원 명세서 (초안)</p>
+              <p className="text-[11px] tracking-widest text-neutral-400">특허 출원 서류 (초안)</p>
               <h1 className="mt-1 text-base font-bold">{project.title}</h1>
             </header>
+
+            {/* 항상 보이는 신뢰·안전 고지 — 비전문가가 'AI가 다 했다'고 오인하지 않도록(DOCX 면책과 동일 취지). */}
+            <p className="mt-3 rounded-md border border-amber-300/60 bg-amber-50 px-3 py-2 text-center text-[11px] leading-relaxed text-amber-800 dark:border-amber-700/40 dark:bg-amber-950/30 dark:text-amber-300">
+              ⚠️ 본 문서는 AI가 생성한 <strong>초안</strong>입니다. 법적 효력이 없으며, 출원 전 반드시{' '}
+              <strong>변리사 검토</strong>가 필요합니다.
+            </p>
 
             {grace?.grace_deadline && (
               <p className={`mt-3 text-center text-[11px] ${grace.expired ? 'text-red-600' : 'text-amber-700'}`}>

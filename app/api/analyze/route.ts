@@ -175,7 +175,7 @@ export async function POST(req: Request) {
     project_id: projectId,
     role: 'assistant',
     kind: 'analysis',
-    content: '출원서 초안(차별성 분석·청구 전략)을 작성/갱신했습니다. 우측 패널에서 확인하세요.',
+    content: '출원 서류 초안(차별성 분석·청구 전략)을 작성/갱신했습니다. 우측 패널에서 확인하세요.',
     data: { elements: overlapRows.length, differentiation_points: diffRows.length },
   })
   if (aMsg.error) console.error('analysis message insert failed:', aMsg.error.message)
