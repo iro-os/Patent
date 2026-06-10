@@ -1,10 +1,10 @@
 import Anthropic from '@anthropic-ai/sdk'
 import type { UsageRecord } from './pricing'
 
-// Default model is Sonnet for dev/testing (cost control). Opus is reserved for
-// production-quality drafting. Configured via PATENT_AI_MODEL so the model stays
-// swappable (consensus plan: model-agnostic config).
-export const MODEL = process.env.PATENT_AI_MODEL || 'claude-sonnet-4-6'
+// Opus 4.8 by default — the product writes 변리사-ready legal text, so output quality is
+// the north star (claude-api guidance also defaults to opus for substantive work). Override
+// with PATENT_AI_MODEL (e.g. claude-sonnet-4-6) for cheaper dev/testing. Stays swappable.
+export const MODEL = process.env.PATENT_AI_MODEL || 'claude-opus-4-8'
 
 // Thrown when the Anthropic key is absent, so routes can return a friendly message
 // instead of a 500. The free retrieval path (PubMed/OpenAlex) works without a key.
@@ -20,9 +20,11 @@ let client: Anthropic | null = null
 export function getAnthropic(): Anthropic {
   const apiKey = process.env.ANTHROPIC_API_KEY
   if (!apiKey) throw new MissingKeyError('ANTHROPIC_API_KEY')
-  // Confidentiality (consensus plan invariant): the Anthropic API does not train on
-  // API inputs/outputs by default. For unpublished invention data, enable Zero Data
-  // Retention at the org level and never route payloads to a training-enabled endpoint.
+  // Confidentiality: the Anthropic API does not train on API inputs/outputs by default,
+  // and that no-train default + per-user RLS is what protects the unpublished invention
+  // data we send. Zero Data Retention (ZDR) is NOT enabled yet (deferred for MVP); enable
+  // it at the org level before handling stricter data. Never route payloads to a
+  // training-enabled endpoint.
   if (!client) client = new Anthropic({ apiKey })
   return client
 }
@@ -38,6 +40,9 @@ export async function runTool<T>(opts: {
   toolDescription: string
   inputSchema: Anthropic.Tool['input_schema']
   maxTokens?: number
+  // Reasoning depth/spend (GA on Opus 4.6+ / Sonnet 4.6). Default 'high' for filing-grade
+  // output; callers may lower it for cheap calls (summaries → 'medium'). 'max' is Opus-tier.
+  effort?: 'low' | 'medium' | 'high' | 'max'
   // Dynamic, per-request context appended as a SECOND system block (never cached,
   // since it changes every turn). Used by chat to make the model aware of the
   // persisted project state (prior-art results, analysis) so it never claims work
@@ -67,6 +72,13 @@ export async function runTool<T>(opts: {
   const res = await anthropic.messages.create({
     model: MODEL,
     max_tokens: opts.maxTokens ?? 2048,
+    // `effort` tunes reasoning depth/spend (GA on Opus 4.6+ / Sonnet 4.6); 'high' is the
+    // quality default for legal drafting. We deliberately do NOT set `thinking` here:
+    // adaptive thinking 400s when tool_choice forces a tool ("Thinking may not be enabled
+    // when tool_choice forces tool use" — verified against the live API 2026-06-11), and
+    // runTool relies on forced tool use for reliable structured JSON. To use thinking,
+    // migrate this call to messages.parse / output_config.format instead.
+    output_config: { effort: opts.effort ?? 'high' },
     system,
     messages,
     tools: [

@@ -39,6 +39,7 @@ export async function summarizeForeignRef(
       toolDescription: '선행기술의 한국어 제목·요약·관련성을 제출합니다.',
       inputSchema: INPUT_SCHEMA,
       maxTokens: 700,
+      effort: 'medium', // 번역·요약은 깊은 추론이 불필요 — 비용 절감
       onUsage,
     })
   } catch (e) {
