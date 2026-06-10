@@ -18,6 +18,9 @@ export interface ChatTurnResult {
   reply_ko: string // markdown shown in the chat timeline
   understanding: ChatUnderstanding
   ready_for_research: boolean
+  // Set when the user asks (in chat) to edit a specific generated 명세서 section — the
+  // chat route then regenerates just that section. Null for ordinary conversation.
+  section_edit: { schema_key: string; instruction: string } | null
 }
 
 export type ChatRole = 'user' | 'assistant'
@@ -42,6 +45,9 @@ export interface ChatContext {
     independent_scope: string | null
     differentiators: string[]
   } | null
+  // KIPO section keys that already have generated body text — the only sections the
+  // assistant may target for a chat-driven edit (section_edit).
+  generated_sections?: string[]
 }
 
 const SYSTEM = `당신은 대한민국 특허 실무(KIPO)에 정통한 변리사 보조 AI입니다. 발명자와 자연스럽게 "대화하며" 발명을 명세서 수준으로 구체화하고, 선행기술을 반영해 출원 전략을 함께 다듬습니다 (Claude Code의 plan 모드처럼).
@@ -111,6 +117,18 @@ const INPUT_SCHEMA: Anthropic.Tool['input_schema'] = {
       required: ['ko', 'en'],
     },
     ready_for_research: { type: 'boolean' },
+    section_edit: {
+      type: 'object',
+      description: '특정 명세서 섹션 편집 요청. 편집 요청이 아니면 schema_key를 빈 문자열("")로 둡니다.',
+      properties: {
+        schema_key: {
+          type: 'string',
+          description: '편집 대상 KIPO 섹션 키 (상태 블록의 "생성됨" 목록에 있는 키 그대로). 편집이 아니면 "".',
+        },
+        instruction: { type: 'string', description: '해당 섹션을 어떻게 고칠지 요지 (없으면 "")' },
+      },
+      required: ['schema_key', 'instruction'],
+    },
   },
   required: [
     'reply_ko',
@@ -123,6 +141,7 @@ const INPUT_SCHEMA: Anthropic.Tool['input_schema'] = {
     'search_query_en',
     'search_concepts',
     'ready_for_research',
+    'section_edit',
   ],
 }
 
@@ -170,6 +189,14 @@ function buildStateContext(ctx?: ChatContext): string {
     lines.push('', '[차별점/청구범위 분석] ✅ 수행됨')
     if (ctx.analysis.independent_scope) lines.push(`- 독립항 범위(추정): ${ctx.analysis.independent_scope}`)
     if (ctx.analysis.differentiators.length) lines.push(`- 차별점: ${ctx.analysis.differentiators.join(' · ')}`)
+  }
+
+  const gs = (ctx.generated_sections ?? []).filter(Boolean)
+  if (gs.length) {
+    lines.push('', `[명세서 본문] ✅ 생성됨 — 섹션: ${gs.join(' · ')}`)
+    lines.push(
+      '사용자가 위 섹션 중 하나를 수정/구체화/다시 써 달라고 하면 section_edit에 {schema_key(위 키 그대로), instruction(요청 요지)}를 채우세요 — 시스템이 그 섹션만 재생성하고 직전 텍스트를 저장합니다. reply_ko에는 "해당 섹션을 다시 작성했고 우측 패널에서 확인·되돌리기 가능"이라고 안내하세요. 일반 대화에서는 section_edit의 schema_key를 빈 문자열로 두세요.',
+    )
   }
 
   lines.push('=== 상태 끝 ===')
@@ -232,6 +259,7 @@ export async function chatTurn(
     search_query_en: string
     search_concepts: SearchConcepts
     ready_for_research: boolean
+    section_edit: { schema_key: string; instruction: string }
   }>({
     system: SYSTEM,
     systemContext,
@@ -258,5 +286,8 @@ export async function chatTurn(
       search_concepts: out.search_concepts ?? { ko: [], en: [] },
     },
     ready_for_research: !!out.ready_for_research,
+    section_edit: out.section_edit?.schema_key?.trim()
+      ? { schema_key: out.section_edit.schema_key.trim(), instruction: (out.section_edit.instruction ?? '').trim() }
+      : null,
   }
 }

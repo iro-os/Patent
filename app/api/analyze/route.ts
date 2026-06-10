@@ -43,7 +43,9 @@ export async function POST(req: Request) {
     .from('prior_art_refs')
     .select('id, title, abstract, ko_summary, pub_date, similarity')
     .eq('project_id', projectId)
+    // Deterministic order (similarity is nullable/tied) so ref_n numbering is stable.
     .order('similarity', { ascending: false, nullsFirst: false })
+    .order('id', { ascending: true })
     .limit(MAX_REFS)
   if (!refs || refs.length === 0) {
     return NextResponse.json(

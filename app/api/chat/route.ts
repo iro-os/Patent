@@ -4,6 +4,8 @@ import { chatTurn, type ChatRole, type ChatContext } from '@/lib/llm/chat'
 import { MissingKeyError } from '@/lib/llm/client'
 import { recordUsage } from '@/lib/llm/usage'
 import { must, PersistError } from '@/lib/db'
+import { regenerateSection } from '@/lib/spec/section'
+import { KIPO_SECTION_KEYS } from '@/lib/kipo/sections'
 
 export const runtime = 'nodejs'
 export const maxDuration = 60
@@ -40,7 +42,7 @@ export async function POST(req: Request) {
   // Prior thread + persisted project state, in parallel. The state is what makes the
   // assistant aware of work already done (prior-art results, analysis) so it never
   // claims "no research was performed" when results actually exist.
-  const [priorRes, debriefRes, refsRes, refsCountRes, coverageRes, claimRes, diffRes] =
+  const [priorRes, debriefRes, refsRes, refsCountRes, coverageRes, claimRes, diffRes, sectionsRes] =
     await Promise.all([
       supabase
         .from('messages')
@@ -57,6 +59,7 @@ export async function POST(req: Request) {
         .select('title, pub_date, source, ko_summary')
         .eq('project_id', projectId)
         .order('similarity', { ascending: false, nullsFirst: false })
+        .order('id', { ascending: true })
         .limit(8),
       supabase
         .from('prior_art_refs')
@@ -69,6 +72,7 @@ export async function POST(req: Request) {
         .maybeSingle(),
       supabase.from('claim_strategy').select('independent_scope').eq('project_id', projectId).maybeSingle(),
       supabase.from('differentiation_points').select('point').eq('project_id', projectId).order('created_at'),
+      supabase.from('spec_sections').select('schema_key, generated_text').eq('project_id', projectId),
     ])
 
   const history = (priorRes.data ?? [])
@@ -110,6 +114,9 @@ export async function POST(req: Request) {
       claimScope || diffPoints.length > 0
         ? { independent_scope: claimScope, differentiators: diffPoints }
         : null,
+    generated_sections: (sectionsRes.data ?? [])
+      .filter((s) => s.generated_text)
+      .map((s) => s.schema_key),
   }
 
   // Persist the user message FIRST so the turn is durable. If the user navigates away
@@ -189,5 +196,36 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'persist_failed' }, { status: 500 })
   }
 
-  return NextResponse.json({ message: assistant, ready_for_research: turn.ready_for_research })
+  // Chat-driven section edit (P0-A): if the model identified a target section, regenerate
+  // just that one with the same grounded service as the right-pane button. Best-effort —
+  // an edit failure must not fail the chat turn (the assistant reply is already persisted).
+  // Gate to sections that ALREADY have body text — chat editing must change an existing
+  // section, never silently create a brand-new one (spec: "그 섹션만 바뀌고").
+  const generatedSet = new Set(
+    (sectionsRes.data ?? []).filter((s) => s.generated_text).map((s) => s.schema_key),
+  )
+  let editedSection: string | null = null
+  if (
+    turn.section_edit &&
+    KIPO_SECTION_KEYS.includes(turn.section_edit.schema_key) &&
+    generatedSet.has(turn.section_edit.schema_key)
+  ) {
+    try {
+      await regenerateSection(
+        supabase,
+        projectId,
+        turn.section_edit.schema_key,
+        turn.section_edit.instruction || null,
+      )
+      editedSection = turn.section_edit.schema_key
+    } catch (e) {
+      console.error('chat section edit failed (non-fatal):', e instanceof Error ? e.message : e)
+    }
+  }
+
+  return NextResponse.json({
+    message: assistant,
+    ready_for_research: turn.ready_for_research,
+    edited_section: editedSection,
+  })
 }

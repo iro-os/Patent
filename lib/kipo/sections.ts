@@ -104,7 +104,9 @@ export const KIPO_SECTION_KEYS = KIPO_SECTIONS.map((s) => s.key)
 //  - 선택 항목은 접이식 '추가 항목 (선택)' 그룹으로 보관
 export interface OutlineGroup {
   group: string
-  items: { key: string }[]
+  // key = canonical schema_key (matches KIPO_SECTIONS / spec_sections.schema_key so
+  // status dots + 근거 chips align); label = optional display override.
+  items: { key: string; label?: string }[]
   optional?: boolean // 기본 접힘 ('추가 항목 (선택)')
 }
 export const SPEC_OUTLINE: OutlineGroup[] = [
@@ -112,7 +114,7 @@ export const SPEC_OUTLINE: OutlineGroup[] = [
   {
     group: '발명의 내용',
     items: [
-      { key: '해결하고자 하는 과제' },
+      { key: '해결하려는 과제', label: '해결하고자 하는 과제' },
       { key: '과제의 해결 수단' },
       { key: '발명의 효과' },
       { key: '도면의 간단한 설명' },
@@ -136,6 +138,25 @@ export const SPEC_OUTLINE: OutlineGroup[] = [
     ],
   },
 ]
+
+// Sections we generate body prose for in P0-A (narrative spec sections, in document
+// order). Claims(특허청구범위) are intentionally excluded — actual claim-text generation
+// is a P1 non-goal; the document uses the claim_strategy dossier for that section.
+export const SPEC_BODY_KEYS: string[] = [
+  '발명의 명칭',
+  '기술분야',
+  '배경기술',
+  '해결하려는 과제',
+  '과제의 해결 수단',
+  '발명의 효과',
+  '도면의 간단한 설명',
+  '발명을 실시하기 위한 구체적인 내용',
+]
+
+// schema_key -> 작성 지침 (generateSection에 주입). KIPO_SECTIONS의 guidance를 빠르게 조회.
+export const SECTION_GUIDANCE: Record<string, string | undefined> = Object.fromEntries(
+  KIPO_SECTIONS.map((s) => [s.key, s.guidance]),
+)
 
 // ── 요약서 (별지 제16호 서식) — 명세서와 별도 서식 ──────────────────────────
 export const KIPO_ABSTRACT = {

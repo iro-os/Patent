@@ -15,8 +15,17 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
   const { data: project } = await supabase.from('projects').select('*').eq('id', id).single()
   if (!project) notFound()
 
-  const [messagesRes, disclosureRes, refsRes, coverageRes, diffRes, devRes, claimRes, usageRes] =
-    await Promise.all([
+  const [
+    messagesRes,
+    disclosureRes,
+    refsRes,
+    coverageRes,
+    diffRes,
+    devRes,
+    claimRes,
+    usageRes,
+    sectionsRes,
+  ] = await Promise.all([
       supabase
         .from('messages')
         .select('id, role, kind, content, data, created_at')
@@ -31,7 +40,11 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
         .from('prior_art_refs')
         .select('id, source, url, pub_date, lang, title, ko_summary, abstract, similarity')
         .eq('project_id', id)
-        .order('similarity', { ascending: false, nullsFirst: false }),
+        // 'id' is a deterministic tiebreaker: similarity is nullable/tied, so without it
+        // two independent queries can order tied rows differently — which would make the
+        // positional 근거-chip mapping (refs[n-1]) point at the wrong document.
+        .order('similarity', { ascending: false, nullsFirst: false })
+        .order('id', { ascending: true }),
       supabase.from('coverage_report').select('*').eq('project_id', id).maybeSingle(),
       supabase.from('differentiation_points').select('point').eq('project_id', id).order('created_at'),
       supabase
@@ -47,6 +60,10 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
       supabase
         .from('usage_log')
         .select('cost_usd, input_tokens, output_tokens, cache_read_input_tokens')
+        .eq('project_id', id),
+      supabase
+        .from('spec_sections')
+        .select('schema_key, generated_text, base_generated_text, locked')
         .eq('project_id', id),
     ])
 
@@ -78,11 +95,12 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
           key={id}
           projectId={id}
           project={{ title: project.title, status: project.status }}
-          refsCount={refs.length}
+          refs={refs}
           claimStrategy={claimRes.data}
           differentiation={diffRes.data ?? []}
           develop={devRes.data ?? []}
           disclosure={disclosureRes.data}
+          sections={sectionsRes.data ?? []}
         />
       }
     />
