@@ -38,8 +38,10 @@ export interface BuildInput {
 }
 
 // 발명의 설명 내부 흐름(별지15호). sub='발명의 내용'인 항목은 그 하위 컨테이너로 묶인다.
-const SPEC_FLOW: { key: string; sub?: string; required?: boolean }[] = [
-  { key: '발명의 명칭', required: true },
+const SPEC_FLOW: { key: string; sub?: string; required?: boolean; noNumber?: boolean }[] = [
+  // KIPO 규칙: 발명의 명칭에는 식별번호를 부여하지 않는다 — 【기술분야】가 【0001】로 시작.
+  // (모범명세서 3건 모두 동일.) noNumber로 처리해 명칭은 무번호 한 줄로 렌더.
+  { key: '발명의 명칭', required: true, noNumber: true },
   { key: '기술분야', required: true },
   { key: '배경기술', required: true },
   { key: '선행기술문헌' }, // 상황적(선행기술 목록 있으면 채움)
@@ -82,7 +84,7 @@ export function buildDocumentModel(input: BuildInput): DocContainer[] {
   // ── 1) 발명의 설명 ──────────────────────────────────────────────
   const specSections: DocSection[] = []
   let prevPushedSub: string | undefined
-  for (const { key, sub, required } of SPEC_FLOW) {
+  for (const { key, sub, required, noNumber } of SPEC_FLOW) {
     const text = input.sections[key]?.text?.trim()
     // 선행기술문헌은 본문 생성 대상이 아니므로(미생성), 선행기술 목록이 있으면 인용 리스트로 채운다.
     const lines = text
@@ -98,7 +100,7 @@ export function buildDocumentModel(input: BuildInput): DocContainer[] {
         label: key,
         depth: sub ? 2 : 1,
         kind: 'prose',
-        paragraphs: lines.map((t) => ({ num: ++counter, text: t })),
+        paragraphs: lines.map((t) => ({ num: noNumber ? null : ++counter, text: t })),
         refNs: text ? citedNs(text, refsCount) : [],
         canRevert: input.sections[key]?.canRevert ?? false,
       }

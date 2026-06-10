@@ -49,11 +49,13 @@ function muted(text: string, size = 20): Paragraph {
   })
 }
 // 최상위 구분(발명의 설명/청구범위/요약서) — 예시처럼 가운데 정렬 대제목.
-function divisionHeading(label: string): Paragraph {
+// 요약서는 별지16호(별개 서식)라 새 페이지에서 시작하게 한다(pageBreakBefore).
+function divisionHeading(label: string, pageBreakBefore = false): Paragraph {
   return new Paragraph({
     children: [new TextRun({ text: `【${label}】`, bold: true, font: FONT, size: 30 })],
     alignment: AlignmentType.CENTER,
     spacing: { before: 360, after: 160 },
+    pageBreakBefore,
   })
 }
 
@@ -123,7 +125,7 @@ export async function buildSpecDocx(input: ExportInput): Promise<Buffer> {
     children.push(muted('(미작성 — 본문 생성 필요)'))
   } else {
     for (const c of containers) {
-      children.push(divisionHeading(c.label))
+      children.push(divisionHeading(c.label, c.label === '요약서'))
       for (const sec of c.sections) children.push(...renderSection(sec))
     }
   }
