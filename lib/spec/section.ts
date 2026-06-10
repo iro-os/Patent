@@ -4,6 +4,7 @@ import { sanitizeRefMarkers } from '@/lib/llm/grounding'
 import { recordUsage } from '@/lib/llm/usage'
 import { must } from '@/lib/db'
 import { SECTION_GUIDANCE } from '@/lib/kipo/sections'
+import { pickExemplarSection } from '@/lib/exemplars'
 
 const MAX_REFS = 15
 
@@ -69,6 +70,11 @@ export async function regenerateSection(
   })
   const max = items.length
 
+  // Layer 2: 발명 분야에 맞는 모범 명세서의 같은 섹션을 문체 참고로 주입(매칭 없으면 null).
+  // 결정론적 선택이라 한 문서의 모든 섹션이 같은 예시를 참조 → 문체 일관성 유지.
+  const inventionText = `${debrief.title_guess ?? ''} ${debrief.tech_summary ?? ''} ${debrief.problem ?? ''}`
+  const exemplar = pickExemplarSection(inventionText, sectionKey)
+
   const result = await generateSection(
     {
       sectionKey,
@@ -84,6 +90,7 @@ export async function regenerateSection(
       differentiation: (diffRes.data ?? []).map((d) => d.point).filter(Boolean),
       currentText: existingRes.data?.generated_text ?? null,
       instruction,
+      exemplar,
     },
     (u) => recordUsage(supabase, { projectId, operation: 'generate_section' }, u),
   )
