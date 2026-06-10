@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
+import { usePanelResize, ResizeBar } from './resizable'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -74,6 +75,12 @@ export function InventionSidebar({
     null,
   )
   const [editValue, setEditValue] = useState('')
+  const { width: sidebarWidth, separatorProps: sidebarSep } = usePanelResize('patent.sidebarW', {
+    initial: 256,
+    min: 200,
+    max: 420,
+    side: 'left',
+  })
 
   const patch = async (id: string, body: Record<string, unknown>) => {
     setBusy(true)
@@ -215,7 +222,10 @@ export function InventionSidebar({
   }
 
   return (
-    <aside className="hidden h-full w-64 shrink-0 flex-col border-r border-neutral-200 bg-neutral-50/60 md:flex dark:border-neutral-800 dark:bg-neutral-950/40">
+    <aside
+      style={{ width: sidebarWidth }}
+      className="relative hidden h-full shrink-0 flex-col border-r border-neutral-200 bg-neutral-50/60 md:flex dark:border-neutral-800 dark:bg-neutral-950/40"
+    >
       <div className="flex items-center justify-between px-4 py-4">
         <Link href="/" className="text-sm font-semibold tracking-tight">
           특허 AI
@@ -310,6 +320,7 @@ export function InventionSidebar({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      <ResizeBar separatorProps={sidebarSep} className="absolute inset-y-0 right-0 hidden w-2 md:block" />
     </aside>
   )
 }
