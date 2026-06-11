@@ -60,7 +60,17 @@ export async function searchKipris(opts: KiprisSearchOpts): Promise<RetrievedRef
       console.error('kipris search non-ok status:', res.status)
       return []
     }
-    return parseKiprisXml(await res.text())
+    const xml = await res.text()
+    // KIPRIS는 application 에러(키 만료·파라미터 오류·쿼터 초과)도 HTTP 200으로 주고, 실제 상태는
+    // <resultCode>에 담는다(성공 '00'). res.ok만 보면 만료된 키가 조용히 "선행기술 0건"으로 둔갑해
+    // 신규성 오판 위험(invariant #4). non-'00'은 로그로 드러내고 [] 반환(여전히 fail-safe).
+    const resultCode = first(xml, /<resultCode>([\s\S]*?)<\/resultCode>/)?.trim()
+    if (resultCode && resultCode !== '00') {
+      const msg = clean(first(xml, /<resultMsg>([\s\S]*?)<\/resultMsg>/)) || '(no message)'
+      console.error(`kipris API error: resultCode=${resultCode} ${msg}`)
+      return []
+    }
+    return parseKiprisXml(xml)
   } catch (e) {
     console.error('kipris search failed:', e instanceof Error ? e.message : e)
     return []
