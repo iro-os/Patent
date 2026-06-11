@@ -244,7 +244,8 @@ export async function chatTurn(
     systemContext += `\n\n(이전 ${full.length - kept.length}개 대화 메시지는 위 '현재 프로젝트 상태'에 누적 반영됨 — 최근 ${kept.length}개만 원문으로 첨부.)`
   }
   // First message of a session → ask for a full draft-readiness diagnosis, not a one-liner.
-  if (full.length === 0) {
+  const isFirstTurn = full.length === 0
+  if (isFirstTurn) {
     systemContext = systemContext ? `${systemContext}\n\n${FIRST_TURN_DIRECTIVE}` : FIRST_TURN_DIRECTIVE
   }
 
@@ -268,8 +269,11 @@ export async function chatTurn(
     toolDescription: '대화 응답과 갱신된 발명 이해를 제출합니다.',
     inputSchema: INPUT_SCHEMA,
     // Headroom for richer replies (summarizing prior art + mapping it to the spec)
-    // so a long answer never trips the max_tokens truncation guard.
-    maxTokens: 3500,
+    // so a long answer never trips the max_tokens truncation guard. The first turn
+    // emits the full draft-readiness diagnosis (FIRST_TURN_DIRECTIVE — 6 sections,
+    // tables, 청구항 뼈대), which 3500 truncates; give that one turn extra headroom.
+    // Later turns stay at 3500 (cheaper; replies are incremental, not full debriefs).
+    maxTokens: isFirstTurn ? 5800 : 3500,
     onUsage,
   })
 

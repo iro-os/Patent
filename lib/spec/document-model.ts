@@ -84,6 +84,12 @@ export function paraLabel(n: number): string {
   return `【${String(n).padStart(4, '0')}】`
 }
 
+// 청구범위(청구항) 실제 텍스트는 의도적으로 자동 생성하지 않는다(비목표 — 변리사 작성 영역).
+// 본문 뷰와 DOCX가 같은 문서 모델을 walk하므로, 이 경고를 모델에 한 번만 심으면 두 출력에
+// 동일하게 노출된다. claim_strategy(전략)는 보여주되 그것이 청구항 텍스트가 아님을 분명히 한다.
+export const CLAIMS_NOT_GENERATED_NOTE =
+  '※ 청구범위(청구항)는 자동 생성하지 않습니다 — 변리사 작성 영역입니다. 위 전략은 작성 참고용 골격일 뿐, 실제 청구항 텍스트가 아니며 변리사 검토·작성이 필요합니다.'
+
 // 선행기술문헌 refs → 렌더 항목들. 모범명세서 형식: 【특허문헌】/【비특허문헌】 하위표제 +
 // (특허문헌 0001) 인용 + 블록 전체에 식별번호 1개(첫 인용항목). refs 없으면 빈 배열.
 function buildPriorArtItems(
@@ -176,27 +182,39 @@ export function buildDocumentModel(input: BuildInput): DocContainer[] {
   }
   if (specSections.length) containers.push({ label: '발명의 설명', sections: specSections })
 
-  // ── 2) 청구범위 (P1 전까지 전략 블록) ───────────────────────────
-  if (input.claimStrategy?.independent_scope) {
-    containers.push({
-      label: '청구범위',
-      sections: [
-        {
-          sectionKey: '청구범위',
-          label: '청구범위',
-          depth: 1,
-          kind: 'claimStrategy',
-          paragraphs: [],
-          refNs: [],
-          canRevert: false,
-          claim: {
-            independentScope: input.claimStrategy.independent_scope,
-            ladder: input.claimStrategy.dependent_ladder ?? [],
-          },
+  // ── 2) 청구범위 ─────────────────────────────────────────────────
+  // 실제 청구항 텍스트는 자동 생성하지 않는다(비목표 — 변리사 작성 영역). 따라서 청구범위는
+  // 항상 노출하되: 전략(claim_strategy)이 있으면 참고용 골격(claimStrategy)으로, 전략조차 없으면
+  // "자동 생성 안 함" 경고 노트(note)로 보여준다. 종전에는 전략이 없으면 청구범위 컨테이너 자체가
+  // 누락되어, 부분 문서가 마치 완결된 것처럼 보이는 정직성 문제가 있었다(coverage 정직성 #4).
+  // 두 출력(앱 본문·DOCX)이 같은 모델을 walk하므로 이 한 곳의 변경이 양쪽에 동일하게 반영된다.
+  // (컨테이너 표제 【청구범위】와 섹션 표제 중복을 피하려고 섹션은 항상 1개만 emit한다 — note는
+  // 섹션 표제가 그려지므로 claimStrategy와 동시에 두지 않는다.)
+  const claimSection: DocSection = input.claimStrategy?.independent_scope
+    ? {
+        sectionKey: '청구범위',
+        label: '청구범위',
+        depth: 1,
+        kind: 'claimStrategy',
+        paragraphs: [],
+        refNs: [],
+        canRevert: false,
+        claim: {
+          independentScope: input.claimStrategy.independent_scope,
+          ladder: input.claimStrategy.dependent_ladder ?? [],
         },
-      ],
-    })
-  }
+      }
+    : {
+        sectionKey: '청구범위',
+        label: '청구범위',
+        depth: 1,
+        kind: 'note',
+        paragraphs: [],
+        refNs: [],
+        canRevert: false,
+        note: CLAIMS_NOT_GENERATED_NOTE,
+      }
+  containers.push({ label: '청구범위', sections: [claimSection] })
 
   // ── 3) 요약서 (요약 + 대표도) ───────────────────────────────────
   const abstract = input.abstract?.trim()
