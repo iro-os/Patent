@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { toast } from 'sonner'
 
 export default function LoginPage() {
   const [loading, setLoading] = useState(false)
@@ -15,7 +16,7 @@ export default function LoginPage() {
     })
     if (error) {
       setLoading(false)
-      alert(`로그인 오류: ${error.message}`)
+      toast.error(`로그인 오류: ${error.message}`)
     }
   }
 

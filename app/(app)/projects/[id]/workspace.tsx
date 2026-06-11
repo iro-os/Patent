@@ -59,6 +59,24 @@ const RESEARCH_STATUS = [
   '정리하고 있어요…',
 ]
 
+// Onboarding seeds for the empty state — concrete, medical-device-flavoured (client: 엑셀바이오)
+// so a non-expert sees the *level of detail* a strong first message carries (문제 → 기존 방식 →
+// 차별점). Clicking one fills the composer; the user then edits it into their own invention.
+const INVENTION_EXAMPLES: { label: string; text: string }[] = [
+  {
+    label: '약물 방출 스텐트',
+    text: '혈관에 삽입하는 스텐트인데, 재협착을 막기 위해 표면 코팅에서 약물이 약 4주에 걸쳐 서서히 방출되도록 설계했습니다. 기존 제품은 초기에 약물이 한꺼번에 빠져나가는 문제가 있었는데, 이를 다층 코팅으로 해결했습니다.',
+  },
+  {
+    label: '심전도 측정 패치',
+    text: '가슴에 붙이는 일회용 심전도 패치입니다. 측정 데이터를 무선으로 스마트폰에 전송하고, 부정맥이 감지되면 자동으로 알림을 보냅니다. 방수 처리되어 샤워 중에도 떼지 않고 연속 측정할 수 있는 점이 핵심입니다.',
+  },
+  {
+    label: '내시경 지혈 클립',
+    text: '내시경 수술에서 출혈 부위를 집는 지혈 클립입니다. 한 손으로 조작할 수 있고, 기존 제품보다 적은 힘으로도 조직을 단단히 고정합니다. 시술 시간을 단축하고 재출혈을 줄이는 것이 목표입니다.',
+  },
+]
+
 export function Workspace({
   projectId,
   messages: serverMessages,
@@ -221,6 +239,11 @@ export function Workspace({
   }
 
   const lastResearchId = [...msgs].reverse().find((m) => m.kind === 'research')?.id ?? null
+  // Nudge toward the natural next step: once the idea has at least one AI reply but no
+  // prior-art search has run yet, promote the 심층 리서치 action (primary styling + hint).
+  const hasResearch = lastResearchId !== null
+  const suggestResearch =
+    !researching && !hasResearch && msgs.some((m) => m.role === 'assistant' && m.kind === 'text')
 
   return (
     <div className="flex h-full flex-col">
@@ -228,7 +251,12 @@ export function Workspace({
       <div ref={scrollRef} className="flex-1 overflow-y-auto">
         <div className="mx-auto max-w-2xl px-6 py-6">
           {empty ? (
-            <EmptyState dragOver={dragOver} setDragOver={setDragOver} addFiles={addFiles} />
+            <EmptyState
+              dragOver={dragOver}
+              setDragOver={setDragOver}
+              addFiles={addFiles}
+              onPickExample={setInput}
+            />
           ) : (
             <div className="space-y-5">
               {msgs.map((m) => (
@@ -254,22 +282,36 @@ export function Workspace({
       <div className="border-t border-neutral-200 bg-white/70 px-6 py-3 backdrop-blur dark:border-neutral-800 dark:bg-neutral-950/60">
         <div className="mx-auto max-w-2xl">
           {files.length > 0 && (
-            <div className="mb-2 flex flex-wrap gap-1.5">
-              {files.map((f, i) => (
-                <span
-                  key={`${f.name}-${i}`}
-                  className="flex items-center gap-1 rounded-full bg-neutral-100 px-2.5 py-1 text-xs dark:bg-neutral-800"
-                >
-                  {f.name}
-                  <button
-                    onClick={() => setFiles(files.filter((_, j) => j !== i))}
-                    className="text-neutral-400 hover:text-neutral-600"
-                    aria-label="첨부 제거"
+            <div className="mb-2">
+              <div className="flex flex-wrap gap-1.5">
+                {files.map((f, i) => (
+                  <span
+                    key={`${f.name}-${i}`}
+                    className="flex items-center gap-1 rounded-full bg-neutral-100 px-2.5 py-1 text-xs dark:bg-neutral-800"
                   >
-                    ✕
-                  </button>
-                </span>
-              ))}
+                    {f.name}
+                    <button
+                      onClick={() => setFiles(files.filter((_, j) => j !== i))}
+                      className="text-neutral-400 hover:text-neutral-600"
+                      aria-label="첨부 제거"
+                    >
+                      ✕
+                    </button>
+                  </span>
+                ))}
+              </div>
+              <p className="mt-1.5 text-[11px] text-amber-600 dark:text-amber-500">
+                ℹ️ 파일 내용 자동 분석은 준비 중이에요. 지금은 파일명만 첨부되니, 핵심 내용은 메시지에 함께 적어 주세요.
+              </p>
+            </div>
+          )}
+
+          {suggestResearch && (
+            <div className="mb-2 flex items-center gap-2 rounded-lg bg-blue-50 px-3 py-1.5 text-xs text-blue-700 dark:bg-blue-950/30 dark:text-blue-300">
+              <span>💡</span>
+              <span>
+                발명이 어느 정도 정리됐어요. 이제 <strong>🔍 심층 리서치</strong>로 선행기술을 확인해 보세요.
+              </span>
             </div>
           )}
 
@@ -277,6 +319,7 @@ export function Workspace({
             <textarea
               value={input}
               onChange={(e) => setInput(e.target.value)}
+              aria-label="발명 아이디어 입력"
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault()
@@ -299,7 +342,11 @@ export function Workspace({
                 </label>
                 <Popover open={showDisc} onOpenChange={setShowDisc}>
                   <PopoverTrigger asChild>
-                    <Button variant="outline" size="sm" disabled={researching}>
+                    <Button
+                      variant={suggestResearch ? 'default' : 'outline'}
+                      size="sm"
+                      disabled={researching}
+                    >
                       {researching ? '검색 중…' : '🔍 심층 리서치'}
                     </Button>
                   </PopoverTrigger>
@@ -342,7 +389,7 @@ function ThinkingIndicator({ mode }: { mode: 'chat' | 'research' }) {
     return () => clearInterval(iv)
   }, [lines.length])
   return (
-    <div className="flex items-center gap-3">
+    <div className="flex items-center gap-3" role="status" aria-live="polite">
       <span className="relative flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-neutral-900 text-[10px] font-semibold text-white dark:bg-white dark:text-neutral-900">
         <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-neutral-900/30 dark:bg-white/30" />
         AI
@@ -356,10 +403,12 @@ function EmptyState({
   dragOver,
   setDragOver,
   addFiles,
+  onPickExample,
 }: {
   dragOver: boolean
   setDragOver: (v: boolean) => void
   addFiles: (l: FileList | null) => void
+  onPickExample: (text: string) => void
 }) {
   return (
     <div className="py-10 text-center">
@@ -368,6 +417,26 @@ function EmptyState({
         아이디어를 자유롭게 설명하면 AI가 정리하고 빠진 점을 물어봅니다. 대화를 이어가며 발명을
         구체화한 뒤, 심층 리서치와 출원 서류 초안으로 넘어가세요.
       </p>
+
+      <div className="mx-auto mt-5 max-w-md text-left">
+        <p className="text-xs text-neutral-400">예시로 시작해 보세요 — 누르면 입력창에 채워져요</p>
+        <div className="mt-2 flex flex-col gap-1.5">
+          {INVENTION_EXAMPLES.map((ex) => (
+            <button
+              key={ex.label}
+              type="button"
+              onClick={() => onPickExample(ex.text)}
+              className="rounded-lg border border-neutral-200 px-3 py-2 text-left transition hover:border-neutral-400 hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-900"
+            >
+              <span className="block text-xs font-medium text-neutral-800 dark:text-neutral-100">
+                {ex.label}
+              </span>
+              <span className="mt-0.5 line-clamp-2 block text-[11px] text-neutral-400">{ex.text}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
       <label
         onDragOver={(e) => {
           e.preventDefault()

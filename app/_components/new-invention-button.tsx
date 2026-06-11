@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { toast } from 'sonner'
 
 // Creates a project then navigates into its workspace (Input mode).
 export function NewInventionButton() {
@@ -15,11 +16,12 @@ export function NewInventionButton() {
       const json = await res.json()
       if (json.id) router.push(`/projects/${json.id}`)
       else {
-        alert(`프로젝트 생성 실패: ${json.error ?? '알 수 없는 오류'}`)
+        toast.error(`프로젝트 생성 실패: ${json.error ?? '알 수 없는 오류'}`)
         setLoading(false)
       }
     } catch (e) {
-      alert(`프로젝트 생성 실패: ${String(e)}`)
+      console.error('project create failed:', e)
+      toast.error('프로젝트 생성에 실패했습니다. 네트워크를 확인하고 다시 시도해 주세요.')
       setLoading(false)
     }
   }
