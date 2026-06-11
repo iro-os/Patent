@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { usePanelResize, ResizeBar } from './resizable'
 import { toast } from 'sonner'
+import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -55,9 +56,15 @@ const STATUS_LABEL: Record<string, string> = {
 export function InventionSidebar({
   inventions,
   userEmail,
+  navOpen = false,
+  setNavOpen,
 }: {
   inventions: Invention[]
   userEmail: string
+  // Mobile drawer open-state, owned by AppShell (its md:hidden header has the trigger).
+  // Optional so the component still renders standalone (desktop-only) without them.
+  navOpen?: boolean
+  setNavOpen?: (v: boolean) => void
 }) {
   const router = useRouter()
   const pathname = usePathname()
@@ -146,6 +153,7 @@ export function InventionSidebar({
       const res = await fetch('/api/projects', { method: 'POST' })
       const json = await res.json().catch(() => ({}))
       if (json.id) {
+        setNavOpen?.(false) // close the mobile drawer as we navigate into the new invention
         router.push(`/projects/${json.id}`)
         router.refresh() // refresh the layout so the new invention appears in this sidebar
       } else {
@@ -183,6 +191,7 @@ export function InventionSidebar({
         >
           <Link
             href={`/projects/${inv.id}`}
+            onClick={() => setNavOpen?.(false)}
             className="flex min-w-0 flex-1 items-center justify-between px-2.5 py-2"
           >
             <span className="truncate text-sm">{inv.title}</span>
@@ -221,13 +230,14 @@ export function InventionSidebar({
     )
   }
 
-  return (
-    <aside
-      style={{ width: sidebarWidth }}
-      className="relative hidden h-full shrink-0 flex-col border-r border-neutral-200 bg-neutral-50/60 md:flex dark:border-neutral-800 dark:bg-neutral-950/40"
-    >
+  const body = (
+    <>
       <div className="flex items-center justify-between px-4 py-4">
-        <Link href="/" className="text-sm font-semibold tracking-tight">
+        <Link
+          href="/"
+          onClick={() => setNavOpen?.(false)}
+          className="text-sm font-semibold tracking-tight"
+        >
           특허 AI
         </Link>
       </div>
@@ -264,8 +274,31 @@ export function InventionSidebar({
           <button className="mt-1 text-xs text-neutral-400 transition hover:text-neutral-600">로그아웃</button>
         </form>
       </div>
+    </>
+  )
 
-      {/* Rename / group-move dialog (shared) */}
+  return (
+    <>
+      {/* Desktop (md+): persistent, resizable sidebar that survives navigation. */}
+      <aside
+        style={{ width: sidebarWidth }}
+        className="relative hidden h-full shrink-0 flex-col border-r border-neutral-200 bg-neutral-50/60 md:flex dark:border-neutral-800 dark:bg-neutral-950/40"
+      >
+        {body}
+        <ResizeBar separatorProps={sidebarSep} className="absolute inset-y-0 right-0 hidden w-2 md:block" />
+      </aside>
+
+      {/* Mobile (<md): the same nav as a left drawer. The hamburger trigger lives in
+          AppShell's md:hidden header, which drives navOpen. */}
+      <Sheet open={navOpen} onOpenChange={(o) => setNavOpen?.(o)}>
+        <SheetContent side="left" className="flex w-72 flex-col gap-0 p-0">
+          <SheetTitle className="sr-only">발명 목록</SheetTitle>
+          {body}
+        </SheetContent>
+      </Sheet>
+
+      {/* Rename / group-move dialog (shared — radix portals out, so one instance serves
+          both the desktop aside and the mobile drawer) */}
       <Dialog open={editTarget !== null} onOpenChange={(o) => !o && setEditTarget(null)}>
         <DialogContent className="sm:max-w-sm">
           <DialogHeader>
@@ -320,7 +353,6 @@ export function InventionSidebar({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-      <ResizeBar separatorProps={sidebarSep} className="absolute inset-y-0 right-0 hidden w-2 md:block" />
-    </aside>
+    </>
   )
 }
