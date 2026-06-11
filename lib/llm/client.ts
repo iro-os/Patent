@@ -1,10 +1,11 @@
 import Anthropic from '@anthropic-ai/sdk'
 import type { UsageRecord } from './pricing'
 
-// Opus 4.8 by default — the product writes 변리사-ready legal text, so output quality is
-// the north star (claude-api guidance also defaults to opus for substantive work). Override
-// with PATENT_AI_MODEL (e.g. claude-sonnet-4-6) for cheaper dev/testing. Stays swappable.
-export const MODEL = process.env.PATENT_AI_MODEL || 'claude-opus-4-8'
+// Sonnet 4.6 is the cost-controlled default for now; the product writes 변리사-ready legal
+// text, so we plan to switch the default to Opus for production drafting later. A missing
+// env should fail cheap (sonnet), never silently bill Opus. Override with PATENT_AI_MODEL
+// (set PATENT_AI_MODEL=claude-opus-4-8 to go Opus). Stays swappable.
+export const MODEL = process.env.PATENT_AI_MODEL || 'claude-sonnet-4-6'
 
 // Thrown when the Anthropic key is absent, so routes can return a friendly message
 // instead of a 500. The free retrieval path (PubMed/OpenAlex) works without a key.
