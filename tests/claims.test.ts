@@ -5,6 +5,7 @@ import assert from 'node:assert/strict'
 import { parseClaims, formatClaims } from '../lib/claims/parse'
 import { lintClaims, checkSupport, stripJosa } from '../lib/claims/lint'
 import { runCompliance } from '../lib/kipo/compliance'
+import { EDITABLE_SECTION_KEYS } from '../lib/kipo/sections'
 
 // ── 파서 ─────────────────────────────────────────────────────────────────────
 
@@ -229,6 +230,18 @@ test('compliance: 범위 밖 인용 [9] → no_fabricated_citations fail', () =>
   const r = results.find((x) => x.check === 'no_fabricated_citations')!
   assert.equal(r.status, 'fail')
   assert.match(r.details[0], /배경기술/)
+})
+
+// ── 인라인 편집 허용 섹션 ────────────────────────────────────────────────────
+
+test('EDITABLE_SECTION_KEYS: 산문 섹션 포함, 파생 섹션 제외', () => {
+  assert.ok(EDITABLE_SECTION_KEYS.has('기술분야'))
+  assert.ok(EDITABLE_SECTION_KEYS.has('배경기술'))
+  assert.ok(EDITABLE_SECTION_KEYS.has('발명을 실시하기 위한 구체적인 내용'))
+  assert.ok(EDITABLE_SECTION_KEYS.has('요약'))
+  // 청구범위(검토 탭 담당)·선행기술문헌(검색 파생)은 직접 편집 대상 아님
+  assert.ok(!EDITABLE_SECTION_KEYS.has('청구범위'))
+  assert.ok(!EDITABLE_SECTION_KEYS.has('선행기술문헌'))
 })
 
 test('compliance: 서지정보 누락 → warn', () => {

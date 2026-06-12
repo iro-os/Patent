@@ -35,7 +35,7 @@ export async function POST(req: Request) {
   if (!project) return NextResponse.json({ error: 'not_found' }, { status: 404 })
 
   const [sectionsRes, refsRes, claimRes, discRes, claimsRes] = await Promise.all([
-    supabase.from('spec_sections').select('schema_key, generated_text').eq('project_id', projectId),
+    supabase.from('spec_sections').select('schema_key, generated_text, manual_override').eq('project_id', projectId),
     supabase
       .from('prior_art_refs')
       .select('source, title, pub_date, url, ext_id')
@@ -53,7 +53,9 @@ export async function POST(req: Request) {
 
   const sections: Record<string, string> = {}
   for (const s of sectionsRes.data ?? []) {
-    if (s.generated_text) sections[s.schema_key] = s.generated_text
+    // 효과적 텍스트: 변리사가 직접 수정한 본문(manual_override)이 있으면 그것이 출력본이다.
+    const effective = s.manual_override ?? s.generated_text
+    if (effective) sections[s.schema_key] = effective
   }
   const refs: ExportRef[] = (refsRes.data ?? []).map((r) => ({
     source: r.source as PriorArtSource,

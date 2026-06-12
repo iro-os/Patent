@@ -50,7 +50,7 @@ export async function regenerateSection(
     supabase.from('differentiation_points').select('point').eq('project_id', projectId).order('created_at'),
     supabase
       .from('spec_sections')
-      .select('generated_text, version, locked')
+      .select('generated_text, manual_override, version, locked')
       .eq('project_id', projectId)
       .eq('schema_key', sectionKey)
       .maybeSingle(),
@@ -88,7 +88,9 @@ export async function regenerateSection(
       refs: items,
       claimScope: claimRes.data?.independent_scope ?? null,
       differentiation: (diffRes.data ?? []).map((d) => d.point).filter(Boolean),
-      currentText: existingRes.data?.generated_text ?? null,
+      // 편집의 기준은 화면에 보이는 "효과적 텍스트" — 사람이 직접 고친 manual_override가 있으면
+      // 그 위에서 다시 쓴다(AI에게 명시적으로 그 섹션을 고쳐 달라고 한 경우이므로 침묵 덮어쓰기 아님).
+      currentText: existingRes.data?.manual_override ?? existingRes.data?.generated_text ?? null,
       instruction,
       exemplar,
     },
@@ -97,7 +99,9 @@ export async function regenerateSection(
 
   const { text: cleanText, cited } = sanitizeRefMarkers(result.text, max)
   const supportingIds = cited.map((n) => idByN.get(n)).filter((x): x is string => !!x)
-  const prevText = existingRes.data?.generated_text ?? null
+  // 1-step undo 대상 = 직전에 화면에 보이던 효과적 텍스트(수동 수정본 우선). 그래야 되돌리기가
+  // "방금 보던 것"으로 정확히 복원된다.
+  const prevText = existingRes.data?.manual_override ?? existingRes.data?.generated_text ?? null
   const nextVersion = (existingRes.data?.version ?? 0) + 1
 
   must(
@@ -107,6 +111,9 @@ export async function regenerateSection(
         schema_key: sectionKey,
         generated_text: cleanText,
         base_generated_text: prevText, // deterministic 1-step undo target
+        // 새 AI 생성물이 곧 보이는 본문이 되도록 수동 수정본을 비운다. 직전 효과적 텍스트는
+        // base_generated_text(되돌리기)로 보존되므로 사람의 편집이 사라지지 않는다.
+        manual_override: null,
         version: nextVersion,
       },
       { onConflict: 'project_id,schema_key' },

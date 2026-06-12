@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { ChevronDown } from 'lucide-react'
 import { toast } from 'sonner'
-import { SPEC_OUTLINE, SPEC_BODY_KEYS, groupKipoCitations } from '@/lib/kipo/sections'
+import { SPEC_OUTLINE, SPEC_BODY_KEYS, EDITABLE_SECTION_KEYS, groupKipoCitations } from '@/lib/kipo/sections'
 import { buildDocumentModel, paraLabel, type DocContainer, type DocSection } from '@/lib/spec/document-model'
 import { computeGrace } from '@/lib/kipo/disclosure'
 import { formatClaims } from '@/lib/claims/parse'
@@ -132,7 +132,6 @@ export function DraftPane({
     !!claimStrategy?.independent_scope || (differentiation?.length ?? 0) > 0 || (develop?.length ?? 0) > 0
 
   const secByKey = new Map((sections ?? []).map((s) => [s.schema_key, s]))
-  const hasBody = (sections ?? []).some((s) => s.generated_text)
   const claimRows = claims ?? []
 
   const statusOf = (key: string): SecStatus => {
@@ -140,12 +139,23 @@ export function DraftPane({
     if (key === '청구범위') return claimRows.length ? 'draft' : 'empty'
     const s = secByKey.get(key)
     if (s?.locked) return 'done'
-    if (s?.generated_text) return 'draft'
+    if (s?.generated_text || s?.manual_override) return 'draft' // 직접 작성한 섹션도 '초안 있음'
     return 'empty'
   }
 
-  // 검토 탭(컴플라이언스·뒷받침 검사)이 보는 "현재 유효 본문" — 수동 수정본이 우선.
+  // 화면·DOCX·검토가 모두 보는 "현재 유효 본문" — 사람이 직접 고친 manual_override가 우선.
   const effectiveText = (s: SpecSectionRow) => (s.manual_override ?? s.generated_text ?? '').trim()
+  const hasBody = (sections ?? []).some((s) => effectiveText(s))
+
+  // 인라인 편집 상태 lookup — 편집 가능 여부 / 직접 수정됨 / 복원할 AI 원본 존재 여부.
+  const editInfoOf = (key: string) => {
+    const s = secByKey.get(key)
+    return {
+      editable: EDITABLE_SECTION_KEYS.has(key),
+      edited: !!s?.manual_override,
+      hasAi: !!s?.generated_text,
+    }
+  }
   const sectionsMap = Object.fromEntries(
     (sections ?? [])
       .filter((s) => s.schema_key !== '요약' && effectiveText(s))
@@ -178,6 +188,49 @@ export function DraftPane({
     }
   }
 
+  // 인라인 직접 편집 저장 — manual_override에 쓴다(AI 원본 generated_text는 보존). 성공 여부를
+  // 반환해 SectionView가 편집 모드를 닫을지 결정한다.
+  const saveSectionText = async (key: string, text: string): Promise<boolean> => {
+    try {
+      const r = await fetch('/api/sections/text', {
+        method: 'POST',
+        headers: JSON_HEADERS,
+        body: JSON.stringify({ projectId, sectionKey: key, text }),
+      })
+      if (!r.ok) {
+        const j = await r.json().catch(() => ({}))
+        toast.error('저장에 실패했습니다.', { description: j.message ?? '' })
+        return false
+      }
+      toast.success(`【${key}】 직접 수정을 저장했습니다.`, { description: '문서·DOCX·검토에 반영됩니다.' })
+      router.refresh()
+      return true
+    } catch {
+      toast.error('저장 중 오류가 발생했습니다.')
+      return false
+    }
+  }
+
+  // 직접 수정본을 버리고 AI 생성본으로 복원(manual_override = null). 결정론적 — LLM 안 거침.
+  const restoreAiText = async (key: string) => {
+    try {
+      const r = await fetch('/api/sections/text', {
+        method: 'POST',
+        headers: JSON_HEADERS,
+        body: JSON.stringify({ projectId, sectionKey: key, restore: true }),
+      })
+      if (!r.ok) {
+        const j = await r.json().catch(() => ({}))
+        toast.error('복원에 실패했습니다.', { description: j.message ?? '' })
+        return
+      }
+      toast.success(`【${key}】 AI 생성본으로 되돌렸습니다.`)
+      router.refresh()
+    } catch {
+      toast.error('복원 중 오류가 발생했습니다.')
+    }
+  }
+
   // One click: ensure the differentiation analysis exists, then generate each core
   // section in document order (per-section calls stay under maxDuration).
   const generateBody = async () => {
@@ -192,8 +245,12 @@ export function DraftPane({
           return
         }
       }
-      // 검토 완료(locked) 섹션은 건너뛴다 — 서버도 거부하지만, 중간에 409로 끊기지 않게.
-      const targets = GENERATE_KEYS.filter((k) => !secByKey.get(k)?.locked)
+      // 검토 완료(locked) + 직접 수정(manual_override) 섹션은 건너뛴다 — 일괄 재생성이 사람의
+      // 편집을 조용히 덮어쓰지 않도록(invariant #3). 명시적 채팅 편집은 그 섹션을 콕 집으므로 별개.
+      const targets = GENERATE_KEYS.filter((k) => {
+        const s = secByKey.get(k)
+        return !s?.locked && !s?.manual_override
+      })
       const skipped = GENERATE_KEYS.length - targets.length
       let allOk = true
       let done = 0
@@ -212,7 +269,7 @@ export function DraftPane({
       // Only claim success if every section landed; otherwise report partial progress.
       if (allOk)
         toast.success('본문 생성을 완료했습니다.', {
-          description: skipped > 0 ? `검토 완료(잠금) 섹션 ${skipped}개는 건너뛰었습니다.` : undefined,
+          description: skipped > 0 ? `검토 완료·직접 수정한 섹션 ${skipped}개는 건너뛰었습니다.` : undefined,
         })
       else if (done > 0)
         toast.warning(`${done}/${targets.length} 섹션까지 생성됨`, { description: '다시 “본문 생성”을 눌러 이어서 시도하세요.' })
@@ -360,16 +417,20 @@ export function DraftPane({
                 containers={buildDocumentModel({
                   sections: Object.fromEntries(
                     (sections ?? [])
-                      .filter((s) => s.generated_text)
+                      .filter((s) => effectiveText(s))
                       .map((s) => [
                         s.schema_key,
-                        // 잠긴(검토 완료) 섹션은 되돌리기도 차단 — 서버(/api/revert)와 일관.
-                        { text: s.generated_text as string, canRevert: s.base_generated_text != null && !s.locked },
+                        {
+                          // 화면 본문 = 효과적 텍스트(직접 수정본 우선).
+                          text: effectiveText(s),
+                          // AI 되돌리기는 직접 수정본이 없을 때만 — 직접 수정은 'AI 생성본으로'로 복원.
+                          canRevert: s.base_generated_text != null && !s.locked && !s.manual_override,
+                        },
                       ]),
                   ),
                   claimStrategy: claimStrategy ?? null,
                   claims: claimRows,
-                  abstract: secByKey.get('요약')?.generated_text ?? null,
+                  abstract: abstractText,
                   refsCount: refList.length,
                   priorArt: groupKipoCitations(refList),
                 })}
@@ -380,6 +441,9 @@ export function DraftPane({
                   return { locked: !!s?.locked, lockable: !!s && !!effectiveText(s) }
                 }}
                 onToggleLock={toggleLock}
+                editInfoOf={editInfoOf}
+                onSaveText={saveSectionText}
+                onRestoreAi={restoreAiText}
               />
             ) : analyzed ? (
               // Pre-body state: show the analysis dossier (strategy/effects/suggestions).
@@ -462,12 +526,18 @@ function DocumentBody({
   onRevert,
   lockOf,
   onToggleLock,
+  editInfoOf,
+  onSaveText,
+  onRestoreAi,
 }: {
   containers: DocContainer[]
   refs: RefRow[]
   onRevert: (key: string) => void
   lockOf: (key: string) => { locked: boolean; lockable: boolean }
   onToggleLock: (key: string, locked: boolean) => void
+  editInfoOf: (key: string) => { editable: boolean; edited: boolean; hasAi: boolean }
+  onSaveText: (key: string, text: string) => Promise<boolean>
+  onRestoreAi: (key: string) => void
 }) {
   return (
     <div className="mt-5 space-y-6 text-[13px] leading-relaxed">
@@ -475,7 +545,17 @@ function DocumentBody({
         <div key={c.label} className="space-y-4">
           <h2 className="border-b border-neutral-300 pb-1 text-center text-[15px] font-bold">【{c.label}】</h2>
           {c.sections.map((s) => (
-            <SectionView key={s.sectionKey} section={s} refs={refs} onRevert={onRevert} lockOf={lockOf} onToggleLock={onToggleLock} />
+            <SectionView
+              key={s.sectionKey}
+              section={s}
+              refs={refs}
+              onRevert={onRevert}
+              lockOf={lockOf}
+              onToggleLock={onToggleLock}
+              editInfoOf={editInfoOf}
+              onSaveText={onSaveText}
+              onRestoreAi={onRestoreAi}
+            />
           ))}
         </div>
       ))}
@@ -483,21 +563,51 @@ function DocumentBody({
   )
 }
 
-// 한 섹션: (발명의 내용 같은) 하위 컨테이너 표제 + 섹션 표제(+되돌리기) + 본문/전략/노트 + 근거 칩.
+// 한 섹션: 하위 컨테이너 표제 + 섹션 표제(+수정/되돌리기/검토) + 본문/전략/노트 + 근거 칩.
+// prose·미작성 노트는 표제를 클릭(또는 "수정")해 인라인 텍스트박스로 직접 편집할 수 있다.
 function SectionView({
   section,
   refs,
   onRevert,
   lockOf,
   onToggleLock,
+  editInfoOf,
+  onSaveText,
+  onRestoreAi,
 }: {
   section: DocSection
   refs: RefRow[]
   onRevert: (key: string) => void
   lockOf: (key: string) => { locked: boolean; lockable: boolean }
   onToggleLock: (key: string, locked: boolean) => void
+  editInfoOf: (key: string) => { editable: boolean; edited: boolean; hasAi: boolean }
+  onSaveText: (key: string, text: string) => Promise<boolean>
+  onRestoreAi: (key: string) => void
 }) {
   const { locked, lockable } = lockOf(section.sectionKey)
+  const { editable, edited, hasAi } = editInfoOf(section.sectionKey)
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  // 편집 시드 = 현재 효과적 본문(문단을 빈 줄로 이어 붙임 — 저장 시 서버가 다시 문단 분리).
+  const seedText = section.paragraphs.map((p) => p.text).join('\n\n')
+  const canEditHere = editable && !locked
+  const startEdit = () => {
+    setDraft(seedText)
+    setEditing(true)
+  }
+  const doSave = async () => {
+    if (!draft.trim()) {
+      toast.error('내용을 입력하세요.')
+      return
+    }
+    setSaving(true)
+    const ok = await onSaveText(section.sectionKey, draft)
+    setSaving(false)
+    if (ok) setEditing(false)
+  }
+
   return (
     <>
       {section.subContainerStart && (
@@ -507,8 +617,31 @@ function SectionView({
         {section.kind !== 'claimStrategy' && (
           <div className="flex items-center justify-between gap-2">
             <h3 className="font-semibold">【{section.label}】</h3>
-            <span className="flex items-center gap-1.5 text-[11px]">
-              {section.canRevert && !locked && (
+            <span className="flex flex-wrap items-center justify-end gap-1.5 text-[11px]">
+              {!editing && canEditHere && (
+                <button
+                  onClick={startEdit}
+                  className="rounded border border-neutral-300 px-1.5 py-0.5 font-medium text-neutral-500 hover:bg-neutral-100"
+                  title="이 섹션을 직접 편집합니다"
+                >
+                  {section.kind === 'note' ? '직접 작성' : '수정'}
+                </button>
+              )}
+              {!editing && edited && (
+                <span className="flex items-center gap-1.5 text-sky-600">
+                  ✎ 직접 수정함
+                  {hasAi && (
+                    <button
+                      onClick={() => onRestoreAi(section.sectionKey)}
+                      className="rounded border border-sky-300 px-1.5 py-0.5 font-medium hover:bg-sky-50"
+                      title="직접 수정본을 버리고 AI 생성본으로 되돌립니다"
+                    >
+                      AI 생성본으로
+                    </button>
+                  )}
+                </span>
+              )}
+              {!editing && section.canRevert && !locked && (
                 <span className="flex items-center gap-1.5 text-amber-600">
                   ✦ AI가 수정함
                   <button
@@ -519,24 +652,25 @@ function SectionView({
                   </button>
                 </span>
               )}
-              {/* 검토 승인 토글 — locked는 재생성·되돌리기를 서버가 차단하는 변리사 확정 표시 */}
+              {/* 검토 승인 토글 — locked는 편집·재생성·되돌리기를 서버가 차단하는 변리사 확정 표시 */}
               {locked ? (
                 <span className="flex items-center gap-1.5 text-emerald-600">
                   ✓ 검토 완료
                   <button
                     onClick={() => onToggleLock(section.sectionKey, false)}
                     className="rounded border border-emerald-300 px-1.5 py-0.5 font-medium hover:bg-emerald-50"
-                    title="잠금을 해제하면 AI 재생성·되돌리기가 다시 가능해집니다"
+                    title="잠금을 해제하면 편집·AI 재생성·되돌리기가 다시 가능해집니다"
                   >
                     해제
                   </button>
                 </span>
               ) : (
+                !editing &&
                 lockable && (
                   <button
                     onClick={() => onToggleLock(section.sectionKey, true)}
                     className="rounded border border-neutral-300 px-1.5 py-0.5 font-medium text-neutral-500 hover:bg-neutral-100"
-                    title="검토 완료로 잠그면 AI 재생성·되돌리기가 차단됩니다"
+                    title="검토 완료로 잠그면 편집·AI 재생성·되돌리기가 차단됩니다"
                   >
                     검토 완료
                   </button>
@@ -546,17 +680,54 @@ function SectionView({
           </div>
         )}
 
-        {section.kind === 'prose' && (
-          <div className="mt-1 space-y-1.5">
-            {section.paragraphs.map((p, i) => (
-              <p key={i}>
-                {p.num != null && (
-                  <span className="mr-1 select-none align-top text-[11px] text-neutral-400">{paraLabel(p.num)}</span>
-                )}
-                {p.text}
-              </p>
-            ))}
+        {/* 인라인 편집기 — prose·미작성 노트 공통. ⌘/Ctrl+Enter 저장 · Esc 취소. */}
+        {editing ? (
+          <div className="mt-1.5">
+            <textarea
+              autoFocus
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') {
+                  e.preventDefault()
+                  setEditing(false)
+                } else if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+                  e.preventDefault()
+                  void doSave()
+                }
+              }}
+              rows={Math.min(20, Math.max(4, draft.split('\n').length + 1))}
+              spellCheck={false}
+              className="w-full resize-y rounded-md border border-sky-300 bg-white px-3 py-2 text-[13px] leading-relaxed text-neutral-900 outline-none focus:border-sky-500"
+              aria-label={`${section.label} 본문 편집`}
+            />
+            <div className="mt-1.5 flex items-center gap-2">
+              <Button size="sm" onClick={doSave} disabled={saving}>
+                {saving ? '저장 중…' : '저장'}
+              </Button>
+              <button
+                onClick={() => setEditing(false)}
+                disabled={saving}
+                className="rounded border border-neutral-300 px-2 py-1 text-[11px] font-medium text-neutral-500 hover:bg-neutral-100"
+              >
+                취소
+              </button>
+              <span className="text-[10px] text-neutral-400">⌘/Ctrl+Enter 저장 · Esc 취소 · 빈 줄로 문단 구분</span>
+            </div>
           </div>
+        ) : (
+          section.kind === 'prose' && (
+            <div className="mt-1 space-y-1.5">
+              {section.paragraphs.map((p, i) => (
+                <p key={i}>
+                  {p.num != null && (
+                    <span className="mr-1 select-none align-top text-[11px] text-neutral-400">{paraLabel(p.num)}</span>
+                  )}
+                  {p.text}
+                </p>
+              ))}
+            </div>
+          )
         )}
 
         {section.kind === 'priorArt' && (
@@ -606,9 +777,9 @@ function SectionView({
           </div>
         )}
 
-        {section.kind === 'note' && <p className="mt-1 text-neutral-500">{section.note}</p>}
+        {!editing && section.kind === 'note' && <p className="mt-1 text-neutral-500">{section.note}</p>}
 
-        {section.refNs.length > 0 && <Chips refNs={section.refNs} refs={refs} />}
+        {!editing && section.refNs.length > 0 && <Chips refNs={section.refNs} refs={refs} />}
       </section>
     </>
   )

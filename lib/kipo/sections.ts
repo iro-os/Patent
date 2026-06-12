@@ -93,6 +93,14 @@ export const KIPO_SECTIONS: KipoSection[] = [
 export type KipoSectionKey = string
 export const KIPO_SECTION_KEYS = KIPO_SECTIONS.map((s) => s.key)
 
+// 인라인 직접 편집(manual_override)을 허용하는 섹션 — 자유 산문(prose)으로 렌더되는 항목만.
+// 제외: 청구범위(검토 탭의 청구항 워크벤치가 담당), 선행기술문헌(검색 결과로 파생 — 직접 편집 대상 아님).
+// 포함: 별지15호 산문 섹션 + 별지16호 요약(요약서).
+export const EDITABLE_SECTION_KEYS = new Set<string>([
+  ...KIPO_SECTION_KEYS.filter((k) => k !== '청구범위' && k !== '선행기술문헌'),
+  '요약',
+])
+
 // ── UI 아웃라인 (출원서 초안 '목차' 탭) ──────────────────────────────────────
 // 문서 export 순서는 위 KIPO_SECTIONS(공식 별지15호)를 따르되, 화면 목차는 발명자에게
 // 친화적인 그룹으로 보여준다. (UI 그룹핑 ≠ 출력 문서 순서)
