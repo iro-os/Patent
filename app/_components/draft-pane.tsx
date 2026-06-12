@@ -618,15 +618,6 @@ function SectionView({
           <div className="flex items-center justify-between gap-2">
             <h3 className="font-semibold">【{section.label}】</h3>
             <span className="flex flex-wrap items-center justify-end gap-1.5 text-[11px]">
-              {!editing && canEditHere && (
-                <button
-                  onClick={startEdit}
-                  className="rounded border border-neutral-300 px-1.5 py-0.5 font-medium text-neutral-500 hover:bg-neutral-100"
-                  title="이 섹션을 직접 편집합니다"
-                >
-                  {section.kind === 'note' ? '직접 작성' : '수정'}
-                </button>
-              )}
               {!editing && edited && (
                 <span className="flex items-center gap-1.5 text-sky-600">
                   ✎ 직접 수정함
@@ -717,7 +708,27 @@ function SectionView({
           </div>
         ) : (
           section.kind === 'prose' && (
-            <div className="mt-1 space-y-1.5">
+            // 본문 텍스트를 직접 클릭하면 인라인 편집기로 — 별도 버튼 없이 스무스하게.
+            <div
+              className={`mt-1 space-y-1.5${
+                canEditHere ? ' -mx-1 cursor-text rounded-md px-1 transition hover:bg-sky-50/70 dark:hover:bg-sky-950/20' : ''
+              }`}
+              onClick={canEditHere ? startEdit : undefined}
+              onKeyDown={
+                canEditHere
+                  ? (e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault()
+                        startEdit()
+                      }
+                    }
+                  : undefined
+              }
+              role={canEditHere ? 'button' : undefined}
+              tabIndex={canEditHere ? 0 : undefined}
+              title={canEditHere ? '클릭하여 편집' : undefined}
+              aria-label={canEditHere ? `${section.label} 본문 — 클릭하여 편집` : undefined}
+            >
               {section.paragraphs.map((p, i) => (
                 <p key={i}>
                   {p.num != null && (
@@ -777,7 +788,29 @@ function SectionView({
           </div>
         )}
 
-        {!editing && section.kind === 'note' && <p className="mt-1 text-neutral-500">{section.note}</p>}
+        {!editing &&
+          section.kind === 'note' &&
+          (canEditHere ? (
+            // 미작성 필수 섹션 — 클릭하면 그 자리에서 직접 작성.
+            <p
+              onClick={startEdit}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  startEdit()
+                }
+              }}
+              role="button"
+              tabIndex={0}
+              title="클릭하여 직접 작성"
+              aria-label={`${section.label} — 클릭하여 직접 작성`}
+              className="mt-1 -mx-1 cursor-text rounded-md px-1 text-neutral-400 transition hover:bg-sky-50/70 dark:hover:bg-sky-950/20"
+            >
+              {section.note} <span className="text-sky-500">— 클릭하여 직접 작성</span>
+            </p>
+          ) : (
+            <p className="mt-1 text-neutral-500">{section.note}</p>
+          ))}
 
         {!editing && section.refNs.length > 0 && <Chips refNs={section.refNs} refs={refs} />}
       </section>
