@@ -21,13 +21,14 @@ export interface DocSection {
   label: string // 표제 텍스트 (예: '기술분야')
   depth: 1 | 2 // 1 = 발명의 설명 직속, 2 = 발명의 내용 하위
   subContainerStart?: string // 이 섹션 앞에 하위 컨테이너 표제를 emit (예: '발명의 내용')
-  kind: 'prose' | 'claimStrategy' | 'note' | 'priorArt'
+  kind: 'prose' | 'claimStrategy' | 'note' | 'priorArt' | 'claims'
   paragraphs: DocParagraph[] // kind=prose
   refNs: number[] // 근거 칩(앱 전용; DOCX는 무시)
   canRevert: boolean // 되돌리기 스트립(앱 전용)
   claim?: { independentScope: string | null; ladder: string[] } // kind=claimStrategy
   note?: string // kind=note
   priorArtItems?: PriorArtItem[] // kind=priorArt (선행기술문헌)
+  claimsList?: { number: number; text: string }[] // kind=claims (변리사 확정 청구항)
 }
 
 export interface DocContainer {
@@ -39,6 +40,8 @@ export interface BuildInput {
   // 생성된 섹션: schema_key -> { 본문, 되돌리기 가능 여부 }
   sections: Record<string, { text: string; canRevert: boolean }>
   claimStrategy?: { independent_scope: string | null; dependent_ladder?: string[] } | null
+  /** 변리사가 검토 탭에서 확정(저장)한 실제 청구항 — 있으면 전략 블록 대신 정식 렌더 */
+  claims?: { number: number; text: string }[]
   abstract?: string | null // 요약서 본문(spec_sections['요약'])
   repFigure?: string | null // 대표도 (예: '도 1')
   refsCount?: number // in-range [N] 칩 필터용
@@ -183,14 +186,26 @@ export function buildDocumentModel(input: BuildInput): DocContainer[] {
   if (specSections.length) containers.push({ label: '발명의 설명', sections: specSections })
 
   // ── 2) 청구범위 ─────────────────────────────────────────────────
-  // 실제 청구항 텍스트는 자동 생성하지 않는다(비목표 — 변리사 작성 영역). 따라서 청구범위는
-  // 항상 노출하되: 전략(claim_strategy)이 있으면 참고용 골격(claimStrategy)으로, 전략조차 없으면
-  // "자동 생성 안 함" 경고 노트(note)로 보여준다. 종전에는 전략이 없으면 청구범위 컨테이너 자체가
-  // 누락되어, 부분 문서가 마치 완결된 것처럼 보이는 정직성 문제가 있었다(coverage 정직성 #4).
-  // 두 출력(앱 본문·DOCX)이 같은 모델을 walk하므로 이 한 곳의 변경이 양쪽에 동일하게 반영된다.
-  // (컨테이너 표제 【청구범위】와 섹션 표제 중복을 피하려고 섹션은 항상 1개만 emit한다 — note는
-  // 섹션 표제가 그려지므로 claimStrategy와 동시에 두지 않는다.)
-  const claimSection: DocSection = input.claimStrategy?.independent_scope
+  // 우선순위: ① 변리사가 검토 탭에서 확정(저장)한 실제 청구항(claims) → 정식 【청구항 N】 렌더,
+  // ② 전략(claim_strategy)만 있으면 참고용 골격(claimStrategy), ③ 둘 다 없으면 "자동 생성 안 함"
+  // 경고 노트(note). 자동 생성을 하지 않는 원칙은 그대로 — claims는 사람이 확정한 텍스트만 온다.
+  // 종전에는 전략이 없으면 청구범위 컨테이너 자체가 누락되어, 부분 문서가 마치 완결된 것처럼
+  // 보이는 정직성 문제가 있었다(coverage 정직성 #4). 두 출력(앱 본문·DOCX)이 같은 모델을
+  // walk하므로 이 한 곳의 변경이 양쪽에 동일하게 반영된다. (컨테이너 표제 【청구범위】와 섹션
+  // 표제 중복을 피하려고 섹션은 항상 1개만 emit한다.)
+  const savedClaims = (input.claims ?? []).filter((c) => c.text.trim())
+  const claimSection: DocSection = savedClaims.length
+    ? {
+        sectionKey: '청구범위',
+        label: '청구범위',
+        depth: 1,
+        kind: 'claims',
+        paragraphs: [],
+        refNs: [],
+        canRevert: false,
+        claimsList: savedClaims.slice().sort((a, b) => a.number - b.number),
+      }
+    : input.claimStrategy?.independent_scope
     ? {
         sectionKey: '청구범위',
         label: '청구범위',

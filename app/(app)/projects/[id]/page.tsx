@@ -25,6 +25,7 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
     claimRes,
     usageRes,
     sectionsRes,
+    claimsRes,
   ] = await Promise.all([
       supabase
         .from('messages')
@@ -38,7 +39,7 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
         .maybeSingle(),
       supabase
         .from('prior_art_refs')
-        .select('id, source, url, pub_date, lang, title, ko_summary, abstract, similarity')
+        .select('id, source, url, pub_date, lang, title, ko_summary, abstract, similarity, ext_id')
         .eq('project_id', id)
         // 'id' is a deterministic tiebreaker: similarity is nullable/tied, so without it
         // two independent queries can order tied rows differently — which would make the
@@ -63,8 +64,10 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
         .eq('project_id', id),
       supabase
         .from('spec_sections')
-        .select('schema_key, generated_text, base_generated_text, locked')
+        .select('schema_key, generated_text, base_generated_text, manual_override, locked')
         .eq('project_id', id),
+      // 변리사가 검토 탭에서 확정(저장)한 청구항 — 문서·검토 탭과 DOCX의 【청구범위】 원천.
+      supabase.from('claims').select('number, text').eq('project_id', id).order('number'),
     ])
 
   const refs = refsRes.data ?? []
@@ -101,6 +104,7 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
           develop={devRes.data ?? []}
           disclosure={disclosureRes.data}
           sections={sectionsRes.data ?? []}
+          claims={claimsRes.data ?? []}
         />
       }
     />

@@ -7,6 +7,8 @@ import { toast } from 'sonner'
 import { SPEC_OUTLINE, SPEC_BODY_KEYS, groupKipoCitations } from '@/lib/kipo/sections'
 import { buildDocumentModel, paraLabel, type DocContainer, type DocSection } from '@/lib/spec/document-model'
 import { computeGrace } from '@/lib/kipo/disclosure'
+import { formatClaims } from '@/lib/claims/parse'
+import { ReviewPane } from '@/app/_components/review-pane'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
@@ -38,12 +40,18 @@ interface RefRow {
   pub_date: string | null
   title: string | null
   ko_summary: string | null
+  ext_id?: string | null
 }
 interface SpecSectionRow {
   schema_key: string
   generated_text: string | null
   base_generated_text: string | null
+  manual_override: string | null
   locked: boolean
+}
+interface ClaimRow {
+  number: number
+  text: string
 }
 
 const KIND_LABEL: Record<string, string> = {
@@ -72,6 +80,7 @@ export function DraftPane({
   develop,
   disclosure,
   sections,
+  claims,
 }: {
   projectId: string | null
   project: DraftProject | null
@@ -81,12 +90,13 @@ export function DraftPane({
   develop?: DevRow[]
   disclosure?: Disclosure | null
   sections?: SpecSectionRow[]
+  claims?: ClaimRow[]
 }) {
   const router = useRouter()
   const [generating, setGenerating] = useState(false)
   const [genProgress, setGenProgress] = useState<string | null>(null)
   const [exporting, setExporting] = useState(false)
-  const [tab, setTab] = useState<'outline' | 'document'>('outline')
+  const [tab, setTab] = useState<'outline' | 'document' | 'review'>('outline')
   const docRef = useRef<HTMLDivElement>(null)
   const pendingScrollRef = useRef<string | null>(null)
 
@@ -123,12 +133,49 @@ export function DraftPane({
 
   const secByKey = new Map((sections ?? []).map((s) => [s.schema_key, s]))
   const hasBody = (sections ?? []).some((s) => s.generated_text)
+  const claimRows = claims ?? []
 
   const statusOf = (key: string): SecStatus => {
+    // 청구범위는 spec_sections가 아니라 claims 테이블(변리사 확정 텍스트)에 산다.
+    if (key === '청구범위') return claimRows.length ? 'draft' : 'empty'
     const s = secByKey.get(key)
     if (s?.locked) return 'done'
     if (s?.generated_text) return 'draft'
     return 'empty'
+  }
+
+  // 검토 탭(컴플라이언스·뒷받침 검사)이 보는 "현재 유효 본문" — 수동 수정본이 우선.
+  const effectiveText = (s: SpecSectionRow) => (s.manual_override ?? s.generated_text ?? '').trim()
+  const sectionsMap = Object.fromEntries(
+    (sections ?? [])
+      .filter((s) => s.schema_key !== '요약' && effectiveText(s))
+      .map((s) => [s.schema_key, effectiveText(s)]),
+  )
+  const abstractText = (() => {
+    const s = secByKey.get('요약')
+    return s ? effectiveText(s) || null : null
+  })()
+
+  // 섹션 검토 승인(잠금) 토글 — locked=true는 재생성·되돌리기를 서버가 거부하는 단일 스위치.
+  const toggleLock = async (key: string, locked: boolean) => {
+    try {
+      const r = await fetch('/api/sections/lock', {
+        method: 'POST',
+        headers: JSON_HEADERS,
+        body: JSON.stringify({ projectId, sectionKey: key, locked }),
+      })
+      if (!r.ok) {
+        const j = await r.json().catch(() => ({}))
+        toast.error('검토 상태 변경에 실패했습니다.', { description: j.message ?? '' })
+        return
+      }
+      toast.success(locked ? `【${key}】 검토 완료로 잠갔습니다.` : `【${key}】 잠금을 해제했습니다.`, {
+        description: locked ? 'AI 재생성·되돌리기가 차단됩니다.' : undefined,
+      })
+      router.refresh()
+    } catch {
+      toast.error('검토 상태 변경 중 오류가 발생했습니다.')
+    }
   }
 
   // One click: ensure the differentiation analysis exists, then generate each core
@@ -145,11 +192,14 @@ export function DraftPane({
           return
         }
       }
+      // 검토 완료(locked) 섹션은 건너뛴다 — 서버도 거부하지만, 중간에 409로 끊기지 않게.
+      const targets = GENERATE_KEYS.filter((k) => !secByKey.get(k)?.locked)
+      const skipped = GENERATE_KEYS.length - targets.length
       let allOk = true
       let done = 0
-      for (let i = 0; i < GENERATE_KEYS.length; i++) {
-        const key = GENERATE_KEYS[i]
-        setGenProgress(`【${key}】 생성 중… (${i + 1}/${GENERATE_KEYS.length})`)
+      for (let i = 0; i < targets.length; i++) {
+        const key = targets[i]
+        setGenProgress(`【${key}】 생성 중… (${i + 1}/${targets.length})`)
         const r = await fetch('/api/generate', { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ projectId, sectionKey: key }) })
         if (!r.ok) {
           const j = await r.json().catch(() => ({}))
@@ -160,9 +210,12 @@ export function DraftPane({
         done++
       }
       // Only claim success if every section landed; otherwise report partial progress.
-      if (allOk) toast.success('본문 생성을 완료했습니다.')
+      if (allOk)
+        toast.success('본문 생성을 완료했습니다.', {
+          description: skipped > 0 ? `검토 완료(잠금) 섹션 ${skipped}개는 건너뛰었습니다.` : undefined,
+        })
       else if (done > 0)
-        toast.warning(`${done}/${GENERATE_KEYS.length} 섹션까지 생성됨`, { description: '다시 “본문 생성”을 눌러 이어서 시도하세요.' })
+        toast.warning(`${done}/${targets.length} 섹션까지 생성됨`, { description: '다시 “본문 생성”을 눌러 이어서 시도하세요.' })
       setTab('document')
       router.refresh() // show whatever did land
     } catch {
@@ -217,7 +270,7 @@ export function DraftPane({
 
   return (
     <div className="flex h-full flex-col bg-neutral-100 dark:bg-neutral-900/40">
-      <Tabs value={tab} onValueChange={(v) => setTab(v as 'outline' | 'document')} className="flex h-full flex-col">
+      <Tabs value={tab} onValueChange={(v) => setTab(v as 'outline' | 'document' | 'review')} className="flex h-full flex-col">
         <div className="border-b border-neutral-200 bg-white/70 px-3 pt-2.5 backdrop-blur dark:border-neutral-800 dark:bg-neutral-950/50">
           <TabsList className="h-9 w-full justify-start gap-1 bg-transparent p-0">
             <TabsTrigger value="outline" className="rounded-md px-3 text-xs data-[state=active]:bg-neutral-200/70 dark:data-[state=active]:bg-neutral-800">
@@ -225,6 +278,9 @@ export function DraftPane({
             </TabsTrigger>
             <TabsTrigger value="document" className="rounded-md px-3 text-xs data-[state=active]:bg-neutral-200/70 dark:data-[state=active]:bg-neutral-800">
               제안서 원문
+            </TabsTrigger>
+            <TabsTrigger value="review" className="rounded-md px-3 text-xs data-[state=active]:bg-neutral-200/70 dark:data-[state=active]:bg-neutral-800">
+              검토
             </TabsTrigger>
           </TabsList>
         </div>
@@ -307,16 +363,23 @@ export function DraftPane({
                       .filter((s) => s.generated_text)
                       .map((s) => [
                         s.schema_key,
-                        { text: s.generated_text as string, canRevert: s.base_generated_text != null },
+                        // 잠긴(검토 완료) 섹션은 되돌리기도 차단 — 서버(/api/revert)와 일관.
+                        { text: s.generated_text as string, canRevert: s.base_generated_text != null && !s.locked },
                       ]),
                   ),
                   claimStrategy: claimStrategy ?? null,
+                  claims: claimRows,
                   abstract: secByKey.get('요약')?.generated_text ?? null,
                   refsCount: refList.length,
                   priorArt: groupKipoCitations(refList),
                 })}
                 refs={refList}
                 onRevert={revertSection}
+                lockOf={(key) => {
+                  const s = secByKey.get(key)
+                  return { locked: !!s?.locked, lockable: !!s && !!effectiveText(s) }
+                }}
+                onToggleLock={toggleLock}
               />
             ) : analyzed ? (
               // Pre-body state: show the analysis dossier (strategy/effects/suggestions).
@@ -374,6 +437,18 @@ export function DraftPane({
             )}
           </article>
         </TabsContent>
+
+        {/* ── 검토 (변리사 워크벤치) ─────────────────────────────────────── */}
+        <TabsContent value="review" className="flex-1 overflow-y-auto">
+          <ReviewPane
+            projectId={projectId}
+            sectionsMap={sectionsMap}
+            abstract={abstractText}
+            refs={refList}
+            initialClaimsText={claimRows.length ? formatClaims(claimRows) : ''}
+            onJump={goTo}
+          />
+        </TabsContent>
       </Tabs>
     </div>
   )
@@ -385,10 +460,14 @@ function DocumentBody({
   containers,
   refs,
   onRevert,
+  lockOf,
+  onToggleLock,
 }: {
   containers: DocContainer[]
   refs: RefRow[]
   onRevert: (key: string) => void
+  lockOf: (key: string) => { locked: boolean; lockable: boolean }
+  onToggleLock: (key: string, locked: boolean) => void
 }) {
   return (
     <div className="mt-5 space-y-6 text-[13px] leading-relaxed">
@@ -396,7 +475,7 @@ function DocumentBody({
         <div key={c.label} className="space-y-4">
           <h2 className="border-b border-neutral-300 pb-1 text-center text-[15px] font-bold">【{c.label}】</h2>
           {c.sections.map((s) => (
-            <SectionView key={s.sectionKey} section={s} refs={refs} onRevert={onRevert} />
+            <SectionView key={s.sectionKey} section={s} refs={refs} onRevert={onRevert} lockOf={lockOf} onToggleLock={onToggleLock} />
           ))}
         </div>
       ))}
@@ -409,11 +488,16 @@ function SectionView({
   section,
   refs,
   onRevert,
+  lockOf,
+  onToggleLock,
 }: {
   section: DocSection
   refs: RefRow[]
   onRevert: (key: string) => void
+  lockOf: (key: string) => { locked: boolean; lockable: boolean }
+  onToggleLock: (key: string, locked: boolean) => void
 }) {
+  const { locked, lockable } = lockOf(section.sectionKey)
   return (
     <>
       {section.subContainerStart && (
@@ -423,17 +507,42 @@ function SectionView({
         {section.kind !== 'claimStrategy' && (
           <div className="flex items-center justify-between gap-2">
             <h3 className="font-semibold">【{section.label}】</h3>
-            {section.canRevert && (
-              <span className="flex items-center gap-1.5 text-[11px] text-amber-600">
-                ✦ AI가 수정함
-                <button
-                  onClick={() => onRevert(section.sectionKey)}
-                  className="rounded border border-amber-300 px-1.5 py-0.5 font-medium hover:bg-amber-50"
-                >
-                  되돌리기
-                </button>
-              </span>
-            )}
+            <span className="flex items-center gap-1.5 text-[11px]">
+              {section.canRevert && !locked && (
+                <span className="flex items-center gap-1.5 text-amber-600">
+                  ✦ AI가 수정함
+                  <button
+                    onClick={() => onRevert(section.sectionKey)}
+                    className="rounded border border-amber-300 px-1.5 py-0.5 font-medium hover:bg-amber-50"
+                  >
+                    되돌리기
+                  </button>
+                </span>
+              )}
+              {/* 검토 승인 토글 — locked는 재생성·되돌리기를 서버가 차단하는 변리사 확정 표시 */}
+              {locked ? (
+                <span className="flex items-center gap-1.5 text-emerald-600">
+                  ✓ 검토 완료
+                  <button
+                    onClick={() => onToggleLock(section.sectionKey, false)}
+                    className="rounded border border-emerald-300 px-1.5 py-0.5 font-medium hover:bg-emerald-50"
+                    title="잠금을 해제하면 AI 재생성·되돌리기가 다시 가능해집니다"
+                  >
+                    해제
+                  </button>
+                </span>
+              ) : (
+                lockable && (
+                  <button
+                    onClick={() => onToggleLock(section.sectionKey, true)}
+                    className="rounded border border-neutral-300 px-1.5 py-0.5 font-medium text-neutral-500 hover:bg-neutral-100"
+                    title="검토 완료로 잠그면 AI 재생성·되돌리기가 차단됩니다"
+                  >
+                    검토 완료
+                  </button>
+                )
+              )}
+            </span>
           </div>
         )}
 
@@ -466,6 +575,18 @@ function SectionView({
                 </p>
               ),
             )}
+          </div>
+        )}
+
+        {section.kind === 'claims' && (
+          <div className="mt-1 space-y-3">
+            {(section.claimsList ?? []).map((c) => (
+              <div key={c.number}>
+                <h4 className="text-[12.5px] font-bold text-neutral-700">【청구항 {c.number}】</h4>
+                <p className="mt-0.5 whitespace-pre-line">{c.text}</p>
+              </div>
+            ))}
+            <p className="text-[11px] text-neutral-400">검토 탭에서 확정한 청구항입니다 — 수정도 검토 탭에서.</p>
           </div>
         )}
 

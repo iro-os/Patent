@@ -34,7 +34,7 @@ export async function POST(req: Request) {
     .single()
   if (!project) return NextResponse.json({ error: 'not_found' }, { status: 404 })
 
-  const [sectionsRes, refsRes, claimRes, discRes] = await Promise.all([
+  const [sectionsRes, refsRes, claimRes, discRes, claimsRes] = await Promise.all([
     supabase.from('spec_sections').select('schema_key, generated_text').eq('project_id', projectId),
     supabase
       .from('prior_art_refs')
@@ -47,6 +47,8 @@ export async function POST(req: Request) {
       .limit(15),
     supabase.from('claim_strategy').select('independent_scope, dependent_ladder').eq('project_id', projectId).maybeSingle(),
     supabase.from('disclosure_check').select('disclosed, disclosure_date').eq('project_id', projectId).maybeSingle(),
+    // 변리사가 검토 탭에서 확정(저장)한 실제 청구항 — 있으면 전략 블록 대신 정식 렌더.
+    supabase.from('claims').select('number, text').eq('project_id', projectId).order('number'),
   ])
 
   const sections: Record<string, string> = {}
@@ -69,6 +71,7 @@ export async function POST(req: Request) {
       sections,
       refs,
       claimStrategy: claimRes.data,
+      claims: claimsRes.data ?? [],
       abstract: sections['요약'] ?? null,
       repFigure: null,
       grace,

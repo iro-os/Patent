@@ -20,6 +20,8 @@ export interface ExportInput {
   sections: Record<string, string> // schema_key -> generated_text (생성된 것만)
   refs?: ExportRef[]
   claimStrategy?: { independent_scope: string | null; dependent_ladder: string[] } | null
+  /** 변리사가 검토 탭에서 확정한 실제 청구항 — 있으면 【청구항 N】으로 정식 렌더 */
+  claims?: { number: number; text: string }[]
   abstract?: string | null // 요약서 본문 (spec_sections['요약'])
   repFigure?: string | null // 대표도
   grace?: { grace_deadline?: string; days_remaining?: number; expired?: boolean } | null
@@ -73,6 +75,12 @@ function renderSection(sec: DocSection): Paragraph[] {
       if (it.type === 'subhead') out.push(hx(it.text, 22))
       else out.push(para((it.num ? `${paraLabel(it.num)} ` : '') + it.text))
     }
+  } else if (sec.kind === 'claims') {
+    // 변리사 확정 청구항 — 별지15호 【청구항 N】 + 본문. (컨테이너 표제 【청구범위】는 이미 출력됨)
+    for (const c of sec.claimsList ?? []) {
+      out.push(hx(`청구항 ${c.number}`, 22))
+      for (const line of c.text.split(/\n+/).map((s) => s.trim()).filter(Boolean)) out.push(para(line))
+    }
   } else if (sec.kind === 'claimStrategy' && sec.claim) {
     out.push(para(`(청구 전략 — 실제 청구항 텍스트는 후속 단계) 독립항 범위: ${sec.claim.independentScope ?? ''}`))
     sec.claim.ladder.forEach((c, i) => out.push(para(`종속 ${i + 1}. ${c}`)))
@@ -121,6 +129,7 @@ export async function buildSpecDocx(input: ExportInput): Promise<Buffer> {
       Object.entries(input.sections).map(([k, v]) => [k, { text: v, canRevert: false }]),
     ),
     claimStrategy: input.claimStrategy,
+    claims: input.claims,
     abstract: input.abstract,
     repFigure: input.repFigure,
     refsCount: input.refs?.length ?? 0,
