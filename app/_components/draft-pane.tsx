@@ -99,19 +99,50 @@ export function DraftPane({
   const [tab, setTab] = useState<'outline' | 'document' | 'review'>('outline')
   const docRef = useRef<HTMLDivElement>(null)
   const pendingScrollRef = useRef<string | null>(null)
+  const rafRef = useRef<number | null>(null)
+
+  // 목차/검토 → 명세서 섹션 점프. 탭이 'document'로 바뀐 직후엔 대상 [data-sec] 노드가 아직
+  // 커밋/레이아웃되지 않았을 수 있어, requestAnimationFrame으로 나타날 때까지 폴링한 뒤 스크롤한다
+  // (최대 ~30프레임). **성공하거나 한도 소진까지 pendingScrollRef를 비우지 않는다** — 종전 코드는
+  // el을 찾기 전에 ref를 비워, 첫 프레임에 못 찾으면 영영 재시도하지 못하는 one-shot 결함이 있었다.
+  // 따옴표 선택자라 공백 포함 한글 키('발명의 효과', '발명을 실시하기 위한 구체적인 내용')도 그대로 매칭.
+  const runScroll = () => {
+    if (rafRef.current != null) cancelAnimationFrame(rafRef.current)
+    let frames = 0
+    const step = () => {
+      const key = pendingScrollRef.current
+      if (!key) {
+        rafRef.current = null
+        return
+      }
+      const el = docRef.current?.querySelector<HTMLElement>(`[data-sec="${key}"]`)
+      if (el) {
+        pendingScrollRef.current = null
+        rafRef.current = null
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        return
+      }
+      if (++frames >= 30) {
+        pendingScrollRef.current = null // 대상 없음(미작성/도면 등) — 조용히 포기
+        rafRef.current = null
+        return
+      }
+      rafRef.current = requestAnimationFrame(step)
+    }
+    rafRef.current = requestAnimationFrame(step)
+  }
 
   const goTo = (key: string) => {
     pendingScrollRef.current = key
-    setTab('document')
+    if (tab === 'document') runScroll() // 이미 문서 탭이면 탭 변경이 없어 아래 effect가 안 돔 → 직접 킥
+    else setTab('document') // 탭이 바뀌면 아래 effect가 runScroll 실행
   }
   useEffect(() => {
-    if (tab !== 'document') return
-    const key = pendingScrollRef.current
-    if (!key) return
-    pendingScrollRef.current = null
-    const el = docRef.current?.querySelector(`[data-sec="${key}"]`)
-    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    if (tab === 'document' && pendingScrollRef.current) runScroll()
+    // runScroll은 ref만 읽고 setState를 호출하지 않으므로 [tab]만으로 충분.
   }, [tab])
+  // 언마운트/빠른 연속 클릭 시 대기 중인 rAF 정리.
+  useEffect(() => () => { if (rafRef.current != null) cancelAnimationFrame(rafRef.current) }, [])
 
   if (!project || !projectId) {
     return (
