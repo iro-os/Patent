@@ -231,40 +231,51 @@ function ComplianceRow({ result, onJump }: { result: ComplianceResult; onJump: (
   // 청구범위는 같은 검토 탭의 워크벤치가 대상이라 점프 불필요 — 본문 섹션만 점프 노출.
   const jumpable = result.targetKey && result.targetKey !== '청구범위'
 
-  const head = (
-    <div className="flex w-full items-start gap-2.5 px-3.5 py-2.5 text-left">
+  // 행 내용(상태표시 + 라벨/요약 + 펼침 셰브런). "본문 보기" 버튼은 여기 넣지 않는다 —
+  // 펼침 트리거가 <button>이라, 그 안에 버튼을 두면 <button> 안 <button> 중첩(hydration 에러).
+  const inner = (
+    <>
       <span className={`mt-px w-4 shrink-0 text-center text-[13px] font-bold ${meta.cls}`} aria-label={meta.label}>
         {meta.mark}
       </span>
       <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
-          <span className="text-[12.5px] font-medium text-neutral-800 dark:text-neutral-200">{result.label}</span>
-          {jumpable && (
-            <button
-              onClick={(e) => {
-                e.stopPropagation()
-                onJump(result.targetKey!)
-              }}
-              className="rounded border border-neutral-200 px-1.5 py-px text-[10px] text-neutral-500 hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800"
-            >
-              본문 보기
-            </button>
-          )}
-        </div>
+        <span className="text-[12.5px] font-medium text-neutral-800 dark:text-neutral-200">{result.label}</span>
         <p className="mt-0.5 text-[11px] leading-relaxed text-neutral-500 dark:text-neutral-400">{result.summary}</p>
       </div>
       {hasDetails && (
         <ChevronDown className="mt-1 h-3.5 w-3.5 shrink-0 text-neutral-400 transition-transform group-data-[state=open]:rotate-180" />
       )}
-    </div>
+    </>
   )
 
-  if (!hasDetails) return <li>{head}</li>
+  // "본문 보기"는 트리거의 형제로 — 같은 행에 우측 배치하되 DOM상 버튼 밖.
+  const jumpBtn = jumpable ? (
+    <button
+      onClick={() => onJump(result.targetKey!)}
+      className="my-2 mr-3 shrink-0 self-center rounded border border-neutral-200 px-1.5 py-px text-[10px] text-neutral-500 hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800"
+    >
+      본문 보기
+    </button>
+  ) : null
+
+  if (!hasDetails) {
+    return (
+      <li className="flex items-stretch">
+        <div className="flex flex-1 items-start gap-2.5 px-3.5 py-2.5 text-left">{inner}</div>
+        {jumpBtn}
+      </li>
+    )
+  }
 
   return (
     <li>
       <Collapsible>
-        <CollapsibleTrigger className="group w-full hover:bg-neutral-50 dark:hover:bg-neutral-900/50">{head}</CollapsibleTrigger>
+        <div className="flex items-stretch">
+          <CollapsibleTrigger className="group flex flex-1 items-start gap-2.5 px-3.5 py-2.5 text-left hover:bg-neutral-50 dark:hover:bg-neutral-900/50">
+            {inner}
+          </CollapsibleTrigger>
+          {jumpBtn}
+        </div>
         <CollapsibleContent>
           <ul className="space-y-1 px-3.5 pb-2.5 pl-10">
             {result.details.map((d, i) => (
