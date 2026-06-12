@@ -130,7 +130,8 @@ export const SPEC_OUTLINE: OutlineGroup[] = [
   },
   { group: '청구범위', items: [{ key: '청구범위' }] },
   { group: '요약서', items: [{ key: '요약' }] },
-  { group: '대표도면', items: [{ key: '대표도면' }] },
+  // key는 문서모델의 data-sec('대표도')와 일치해야 목차 점프가 동작한다. 표시는 '대표도면'.
+  { group: '대표도면', items: [{ key: '대표도', label: '대표도면' }] },
   { group: '도면', items: [{ key: '도면' }] },
   {
     group: '추가 항목 (선택)',

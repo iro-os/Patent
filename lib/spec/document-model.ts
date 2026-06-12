@@ -46,6 +46,12 @@ export interface BuildInput {
   repFigure?: string | null // 대표도 (예: '도 1')
   refsCount?: number // in-range [N] 칩 필터용
   priorArt?: { patent: string[]; nonPatent: string[] } // 선행기술문헌(refs를 groupKipoCitations로 분류)
+  /**
+   * 앱 본문 전용: 비어 있는 선택 섹션·대표도·도면까지 **헤딩 + "비어 있음" 한 줄**로 노출한다.
+   * 목차의 모든 항목이 점프 가능한 앵커를 갖게 하기 위함(형식적 완결성). DOCX는 이 옵션을
+   * 켜지 않으므로 내보내기 문서에는 빈 선택 섹션이 들어가지 않는다.
+   */
+  placeholders?: boolean
 }
 
 // 발명의 설명 내부 흐름(별지15호). sub='발명의 내용'인 항목은 그 하위 컨테이너로 묶인다.
@@ -61,7 +67,13 @@ const SPEC_FLOW: { key: string; sub?: string; required?: boolean; noNumber?: boo
   { key: '발명의 효과', sub: '발명의 내용', required: true },
   { key: '도면의 간단한 설명' }, // 도면 없으면 생략
   { key: '발명을 실시하기 위한 구체적인 내용', required: true },
+  // 별지15호의 조건부 항목들 — 본문이 있으면(수동 작성 포함) 렌더하고, 없으면 생략하되
+  // placeholders 모드에선 헤딩+빈 표시로 노출(목차 점프 앵커).
+  { key: '실시예' },
+  { key: '산업상 이용가능성' },
   { key: '부호의 설명' }, // 도면부호 없으면 생략
+  { key: '수탁번호' },
+  { key: '서열목록 자유텍스트' },
 ]
 
 // 텍스트 내 in-range [N] 마커 → 인용 번호(중복 제거·정렬).
@@ -144,6 +156,17 @@ export function buildDocumentModel(input: BuildInput): DocContainer[] {
           canRevert: false,
           priorArtItems: items,
         })
+      } else if (input.placeholders) {
+        specSections.push({
+          sectionKey: key,
+          label: key,
+          depth: 1,
+          kind: 'note',
+          paragraphs: [],
+          refNs: [],
+          canRevert: false,
+          note: '(비어 있음 — 심층 리서치 결과가 여기에 채워집니다)',
+        })
       }
       continue
     }
@@ -175,8 +198,20 @@ export function buildDocumentModel(input: BuildInput): DocContainer[] {
         canRevert: false,
         note: '(미작성 — 본문 생성 필요)',
       }
+    } else if (input.placeholders) {
+      // 앱 본문: 선택 섹션도 헤딩은 항상 — 내용만 "비어 있음" 한 줄(과한 여백 없이).
+      sec = {
+        sectionKey: key,
+        label: key,
+        depth: sub ? 2 : 1,
+        kind: 'note',
+        paragraphs: [],
+        refNs: [],
+        canRevert: false,
+        note: '(비어 있음 — 해당 시 작성)',
+      }
     } else {
-      continue // 선택 섹션이 미생성이면 생략
+      continue // DOCX 등: 선택 섹션이 미생성이면 생략
     }
     // 하위 컨테이너(발명의 내용)의 첫 등장 섹션에만 표제를 emit.
     if (sub && sub !== prevPushedSub) sec.subContainerStart = sub
@@ -233,17 +268,29 @@ export function buildDocumentModel(input: BuildInput): DocContainer[] {
 
   // ── 3) 요약서 (요약 + 대표도) ───────────────────────────────────
   const abstract = input.abstract?.trim()
-  if (abstract) {
+  if (abstract || input.placeholders) {
+    const abstractSection: DocSection = abstract
+      ? {
+          sectionKey: '요약',
+          label: '요약',
+          depth: 1,
+          kind: 'prose',
+          paragraphs: splitParas(abstract).map((t) => ({ num: null, text: t })), // 요약은 번호 없음
+          refNs: citedNs(abstract, refsCount),
+          canRevert: input.sections['요약']?.canRevert ?? false,
+        }
+      : {
+          sectionKey: '요약',
+          label: '요약',
+          depth: 1,
+          kind: 'note',
+          paragraphs: [],
+          refNs: [],
+          canRevert: false,
+          note: '(미작성 — 본문 생성 필요)',
+        }
     const sections: DocSection[] = [
-      {
-        sectionKey: '요약',
-        label: '요약',
-        depth: 1,
-        kind: 'prose',
-        paragraphs: splitParas(abstract).map((t) => ({ num: null, text: t })), // 요약은 번호 없음
-        refNs: citedNs(abstract, refsCount),
-        canRevert: input.sections['요약']?.canRevert ?? false,
-      },
+      abstractSection,
       {
         sectionKey: '대표도',
         label: '대표도',
@@ -256,6 +303,27 @@ export function buildDocumentModel(input: BuildInput): DocContainer[] {
       },
     ]
     containers.push({ label: '요약서', sections })
+  }
+
+  // ── 4) 도면 (별지17호) — 앱 본문 전용 자리표시 ───────────────────
+  // 도면 첨부/생성은 Phase 3 비목표. 목차의 '도면'이 점프할 형식적 헤딩만 노출하고,
+  // DOCX(placeholders 미사용)에는 넣지 않는다.
+  if (input.placeholders) {
+    containers.push({
+      label: '도면',
+      sections: [
+        {
+          sectionKey: '도면',
+          label: '도면',
+          depth: 1,
+          kind: 'note',
+          paragraphs: [],
+          refNs: [],
+          canRevert: false,
+          note: '(비어 있음 — 도면 첨부 기능은 준비 중입니다)',
+        },
+      ],
+    })
   }
 
   return containers

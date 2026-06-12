@@ -464,6 +464,8 @@ export function DraftPane({
                   abstract: abstractText,
                   refsCount: refList.length,
                   priorArt: groupKipoCitations(refList),
+                  // 앱 본문: 빈 선택 섹션·대표도·도면도 헤딩+빈 표시로 — 목차 전 항목 점프 가능.
+                  placeholders: true,
                 })}
                 refs={refList}
                 onRevert={revertSection}
@@ -619,25 +621,55 @@ function SectionView({
   const { editable, edited, hasAi } = editInfoOf(section.sectionKey)
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState('')
-  const [saving, setSaving] = useState(false)
+  // blur 자동저장 직후 서버 새로고침이 도착할 때까지 보여줄 낙관적 본문(깜빡임 방지).
+  const [optimistic, setOptimistic] = useState<string | null>(null)
+  const cancelledRef = useRef(false) // Esc = 저장 없이 닫기 표시
 
   // 편집 시드 = 현재 효과적 본문(문단을 빈 줄로 이어 붙임 — 저장 시 서버가 다시 문단 분리).
   const seedText = section.paragraphs.map((p) => p.text).join('\n\n')
+  // 서버 props가 갱신되면(router.refresh 도착) 낙관적 본문은 역할 종료 — 렌더 중 상태 조정
+  // 패턴(공식 권장; effect 내 setState 린트 회피 + 불필요한 중간 커밋 없음).
+  const [prevSeed, setPrevSeed] = useState(seedText)
+  if (prevSeed !== seedText) {
+    setPrevSeed(seedText)
+    setOptimistic(null)
+  }
+
   const canEditHere = editable && !locked
   const startEdit = () => {
-    setDraft(seedText)
+    setDraft(optimistic ?? seedText) // 연속 편집: 방금 저장한 내용 위에서 이어서
     setEditing(true)
   }
-  const doSave = async () => {
-    if (!draft.trim()) {
-      toast.error('내용을 입력하세요.')
+
+  const normalize = (s: string) => s.replace(/\n{2,}/g, '\n\n').trim()
+
+  // 유일한 종료 경로 = blur. 바깥 아무 데나 클릭하면 자동 저장되며 닫힌다(저장 버튼 없음).
+  // Esc는 cancelledRef를 세우고 blur를 유도해 저장 없이 닫는다. ⌘/Ctrl+Enter도 blur로 수렴.
+  const handleBlur = () => {
+    if (cancelledRef.current) {
+      cancelledRef.current = false
+      setEditing(false)
       return
     }
-    setSaving(true)
-    const ok = await onSaveText(section.sectionKey, draft)
-    setSaving(false)
-    if (ok) setEditing(false)
+    setEditing(false)
+    const trimmed = draft.trim()
+    const base = optimistic ?? seedText
+    if (!trimmed) {
+      if (normalize(base)) toast.info('내용이 비어 있어 저장하지 않았습니다.')
+      return
+    }
+    if (normalize(trimmed) === normalize(base)) return // 변경 없음 — 조용히 닫기
+    setOptimistic(trimmed)
+    void onSaveText(section.sectionKey, trimmed).then((ok) => {
+      if (!ok) setOptimistic(null) // 실패 시 원본 표시로 복귀(에러 토스트는 부모가 띄움)
+    })
   }
+
+  // 낙관적 본문 → 문단 렌더(서버와 같은 빈 줄 분리; 연속 번호는 refresh 후 채워짐).
+  const optimisticParas =
+    !editing && optimistic !== null
+      ? optimistic.split(/\n+/).map((t) => t.trim()).filter(Boolean)
+      : null
 
   return (
     <>
@@ -702,20 +734,22 @@ function SectionView({
           </div>
         )}
 
-        {/* 인라인 편집기 — prose·미작성 노트 공통. ⌘/Ctrl+Enter 저장 · Esc 취소. */}
+        {/* 인라인 편집기 — prose·미작성 노트 공통. 바깥 클릭(blur) = 자동 저장, Esc = 취소. */}
         {editing ? (
           <div className="mt-1.5">
             <textarea
               autoFocus
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
+              onBlur={handleBlur}
               onKeyDown={(e) => {
                 if (e.key === 'Escape') {
                   e.preventDefault()
-                  setEditing(false)
+                  cancelledRef.current = true
+                  e.currentTarget.blur() // 모든 종료는 blur 한 경로로
                 } else if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
                   e.preventDefault()
-                  void doSave()
+                  e.currentTarget.blur() // blur → 자동 저장
                 }
               }}
               rows={Math.min(20, Math.max(4, draft.split('\n').length + 1))}
@@ -723,19 +757,22 @@ function SectionView({
               className="w-full resize-y rounded-md border border-sky-300 bg-white px-3 py-2 text-[13px] leading-relaxed text-neutral-900 outline-none focus:border-sky-500"
               aria-label={`${section.label} 본문 편집`}
             />
-            <div className="mt-1.5 flex items-center gap-2">
-              <Button size="sm" onClick={doSave} disabled={saving}>
-                {saving ? '저장 중…' : '저장'}
-              </Button>
-              <button
-                onClick={() => setEditing(false)}
-                disabled={saving}
-                className="rounded border border-neutral-300 px-2 py-1 text-[11px] font-medium text-neutral-500 hover:bg-neutral-100"
-              >
-                취소
-              </button>
-              <span className="text-[10px] text-neutral-400">⌘/Ctrl+Enter 저장 · Esc 취소 · 빈 줄로 문단 구분</span>
-            </div>
+            <p className="mt-1 text-[10px] text-neutral-400">
+              다른 곳을 클릭하면 자동 저장 · Esc 취소(저장 안 함) · 빈 줄로 문단 구분
+            </p>
+          </div>
+        ) : optimisticParas ? (
+          // 방금 저장한 본문 — 서버 새로고침 도착 전까지의 낙관적 표시(문단번호는 곧 채워짐).
+          <div
+            className={`mt-1 space-y-1.5${
+              canEditHere ? ' -mx-1 cursor-text rounded-md px-1 transition hover:bg-sky-50/70 dark:hover:bg-sky-950/20' : ''
+            }`}
+            onClick={canEditHere ? startEdit : undefined}
+            title={canEditHere ? '클릭하여 편집' : undefined}
+          >
+            {optimisticParas.map((t, i) => (
+              <p key={i}>{t}</p>
+            ))}
           </div>
         ) : (
           section.kind === 'prose' && (
@@ -820,6 +857,7 @@ function SectionView({
         )}
 
         {!editing &&
+          !optimisticParas &&
           section.kind === 'note' &&
           (canEditHere ? (
             // 미작성 필수 섹션 — 클릭하면 그 자리에서 직접 작성.
